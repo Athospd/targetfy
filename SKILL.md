@@ -24,6 +24,8 @@ Turn a **Script Sequence** (one or more `.R` files, listed by the user, in run o
 
 Done when R and its packages are confirmed, the Script Sequence is fixed, and the functions folder is chosen.
 
+Convert every Script Sequence that passes preflight, however small or simple. Preflight's stops are the only reasons not to convert: a three-line script still gets its Pipeline. If the Pipeline gains little, say so in the report's summary and convert anyway.
+
 ## 2. Read
 
 Read every Source Script in full, plus every file they `source()`. Then list:
@@ -43,7 +45,7 @@ Done when every name the scripts use is accounted for, either defined in the scr
 ## 3. Write the Generated Files
 
 Following `references/conversion.md`, write:
-- the functions file(s);
+- one functions file per Source Script (`<script name>_functions.R`);
 - `_targets.R`;
 - `targetfy-map.json`, the **Step Map**.
 

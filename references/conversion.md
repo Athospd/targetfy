@@ -17,10 +17,12 @@ coefs <- summary(model)$coefficients  # Step `model_summary`
 - Statements that keep modifying the same object form one Step.
 - A new object that something downstream uses, or that the user would want to inspect, starts a new Step.
 - Name Targets as nouns that describe the content (`sales_clean`, not `df2`). Name functions as verbs (`clean_sales()`).
+- The house style's "a Target should be large enough to benefit from skipping" guides how you group statements into Steps. It is never a reason to decline a Conversion: a script that is nothing but tiny Steps still becomes a Pipeline, one Target per Step.
 
 ## Code layout
 
 - Put each Step's logic in a function in the functions folder (`R/` or `R_targets/`). Pass data in as arguments, never through globals.
+- Name each functions file after the Source Script its Steps come from: `<script name>_functions.R`. For example, the Steps of `simple_chain_of_operations.R` go in `R/simple_chain_of_operations_functions.R`. A Script Sequence gets one functions file per Source Script.
 - `_targets.R` holds only `library(targets)`, `library(tarchetypes)`, `tar_source("<functions folder>")`, `tar_option_set(packages = ...)` and short Target calls like `tar_target(name, fn(dep1, dep2))`. Always pass the folder to `tar_source()`, even when it's `R/`.
 - **Packages:** every package the scripts attach with `library()` or `require()` goes into `tar_option_set(packages = c(...))`. Calls like `pkg::fn()` stay as they are.
 - **Input files:** use `tar_file_read(name, "path", read = reader(!!.x))`, which creates `name_file` and `name`.

@@ -19,8 +19,8 @@ A **Claude Code skill** (`/targetfy`) that turns a **Script Sequence** (one or m
 
 ## Conversion
 
-- One Target per **Step**, meaning a meaningful object, not one per assignment. A chain of in-place modifications to the same variable becomes one Target.
-- Logic goes into functions in `R_targets/`. `_targets.R` holds only short `tar_target(name, fn(deps))` calls and loads the functions with `tar_source()`.
+- One Target per **Step**, meaning a meaningful object, not one per assignment. Size never blocks a Conversion: any Script Sequence that passes preflight is converted, however small. A chain of in-place modifications to the same variable becomes one Target.
+- Logic goes into functions in `R_targets/`, one file per Source Script, named `<script name>_functions.R`. `_targets.R` holds only short `tar_target(name, fn(deps))` calls and loads the functions with `tar_source()`.
 - Each `library()` call becomes an entry in `tar_option_set(packages = ...)`. `pkg::fn` calls stay as they are.
 - Input files are tracked with `tar_file_read()` and output files become file Targets.
 - Lines that don't belong in a Pipeline (`setwd`, `rm(list = ls())`, `install.packages`, `View`, `readline`, `browser`, bare `print`/`head`) are dropped. Each is listed with its line number and the reason in the **Conversion Report**.
