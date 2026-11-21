@@ -59,6 +59,29 @@ Ordering problems (a later script defines something an earlier one needs) are fl
 - **Static Check** (when the scripts can't be run): the files parse, and `tar_validate()` and `tar_manifest()` pass. The result is marked "Equivalence unverified".
 - **On failure**: fix the Generated Files and check again, up to 3 attempts. After that, stop and keep the Generated Files. The report names the failing Targets and what was tried.
 
+### The check script (`scripts/check.R`)
+
+```
+Rscript scripts/check.R --project DIR --scripts a.R[,b.R] [--map map.json]
+        [--mode equivalence|static] [--max-copy-mb 1024] [--allow-large]
+        [--keep] [--out result.json]
+```
+
+- **Map**: the Conversion writes this file to tell the check which Step each Target replaces. Targets not listed in it are reported `not_compared`:
+  ```json
+  {"targets": {"sales_clean": "df", "model": "model"},
+   "handoff_files": ["tmp/df.rds"],
+   "stochastic": ["rf_fit"]}
+  ```
+- **Output**: JSON with a `status` per Target and per file written. The overall `status` and exit code are:
+  - `equivalent` or `static_pass`: 0
+  - `not_equivalent` or `static_fail`: 1
+  - `error` (the Script Sequence or Pipeline failed to run): 2
+  - `needs_confirmation` (the copy is over the size limit): 3
+- **Script run**: the Script Sequence runs in a fresh R session. `setwd`, `install.packages` and `View` are replaced with no-ops, attached on the search path so that `rm(list = ls())` can't remove them.
+- **Comparison**: before comparing, a model's stored `call`, environments and formula environments are removed. These always differ once code is wrapped in functions.
+- **Reseed rebuild**: the Target is rebuilt in a separate store, with the seed set *before* the Targets are defined. targets fixes each Target's seed when it is defined.
+
 ## Enhancement wizard
 
 Runs after a passing Conversion. It suggests Enhancements tied to specific Targets, and the user accepts or declines each one. Each accepted Enhancement re-runs the check and is undone if the check fails.
