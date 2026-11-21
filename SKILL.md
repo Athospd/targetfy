@@ -8,11 +8,13 @@ allowed-tools: Read, Grep, Glob, Write, Edit, Bash
 
 Turn a **Script Sequence** (one or more `.R` files, listed by the user, in run order) into a `{targets}` **Pipeline** that is **Equivalent** to it: it produces the same final objects and written files. Terms are defined in `GLOSSARY.md` in this skill's folder. The bundled R check (`scripts/check.R`) decides whether a Conversion is accepted; your own judgement about Equivalence never replaces it.
 
-**Hard guardrail:** write only Generated Files: the Pipeline script, the functions folder, the Step Map and the Conversion Report, under the names chosen in preflight. Leave every existing file exactly as it is: Source Scripts, sourced helpers, data, `.Rprofile`, `renv.lock`. Use Edit only on Generated Files. Install nothing: if a package is missing, say so and stop.
+**Hard guardrail:** write only Generated Files: the Pipeline script, the functions folder, the Step Map and the Conversion Report, under the names chosen in preflight. Leave every existing file exactly as it is: Source Scripts, sourced helpers, data, `.Rprofile`, `renv.lock`. Use Edit only on Generated Files. Install nothing: when a package is missing, name it for the user and carry on.
+
+**Keep going.** Once preflight has fixed the Script Sequence and the names, targetfy always writes the Generated Files and the report. Anything that blocks verification (R or a package missing, scripts that fail to run) lowers how much gets checked, and the report and chat say exactly what was skipped and why. It never stops the Conversion.
 
 ## 1. Preflight
 
-1. **Find R.** Use `Rscript` on the PATH. On Windows, if it isn't there, use the highest-versioned `C:/Program Files/R/R-*/bin/Rscript.exe`. Confirm that `targets`, `tarchetypes`, `callr` and `jsonlite` load. If any is missing, stop and name it.
+1. **Find R.** Use `Rscript` on the PATH. On Windows, if it isn't there, use the highest-versioned `C:/Program Files/R/R-*/bin/Rscript.exe`. Confirm that `targets`, `tarchetypes`, `callr` and `jsonlite` load. If R or any of these is missing, name what's missing and continue **unchecked**: steps 4 and 6 and the graph are skipped, and the report's status is "not checked".
 2. **Get the Script Sequence.** Take the files and their order exactly as the user lists them. If the user hasn't listed them, ask. Never infer membership or order from file names or a `run_all.R`. The **project** folder is the user's working directory, unless they name another. Paths are relative to it.
 3. **Accept only `.R` files.** Stop with a clear message for:
    - `.Rmd`, `.qmd`, `.ipynb`: planned, not yet supported.
@@ -31,9 +33,9 @@ Turn a **Script Sequence** (one or more `.R` files, listed by the user, in run o
    - If the chosen Step Map or Conversion Report already exists, it's an earlier targetfy run. Ask before replacing those files.
    - Functions go in `R/` if it's absent or empty, otherwise in `R_targets/`. Tell the user which one.
 
-Done when R and its packages are confirmed, the Script Sequence is fixed, and every Generated File name is chosen.
+Done when you know whether R and its packages are available, the Script Sequence is fixed, and every Generated File name is chosen.
 
-Convert every Script Sequence that passes preflight, however small or simple. Preflight's stops are the only reasons not to convert: a three-line script still gets its Pipeline. If the Pipeline gains little, say so in the report's summary and convert anyway.
+Convert every Script Sequence that passes preflight, however small or simple. The only stops are an unsupported file type (step 3) and the user declining a question. A three-line script still gets its Pipeline. If the Pipeline gains little, say so in the report's summary and convert anyway.
 
 ## 2. Read
 
@@ -49,7 +51,7 @@ Read `references/conversion.md` now. It defines Steps and the code rules.
 
 If there are Unresolved Objects, resolve each one with `references/unresolved-objects.md` before writing anything.
 
-Done when every name the scripts use is accounted for, either defined in the scripts or resolved with the user.
+Done when every name the scripts use is accounted for: defined in the scripts, resolved with the user, or assumed to exist and flagged.
 
 ## 3. Write the Generated Files
 
@@ -71,12 +73,9 @@ Rscript <skill folder>/scripts/check.R --project <project> --scripts a.R,b.R \
 ```
 
 Read `result.json` and act on its `status`:
-- **`equivalent`** or **`static_pass`**: go to step 5.
+- **`equivalent`** or **`static_pass`**: go to step 5. If `result.json` has a `script_failure`, the Source Scripts failed to run on their own, at the `script` and `line` it names, so the check fell back to the Static Check. Equivalence is unverified, and the Targets with `after_failure: true` come from code that never ran. Before step 5, apply `references/unresolved-objects.md` if the message is an object or function not found.
 - **`not_equivalent`** or **`static_fail`**: read each failing Target's `detail` and each failing file, fix the Generated Files, and run the check again. Stop after **3 runs** in total and go to step 5 with what you have.
-- **`error`**:
-  - If the Script Sequence failed on an object not found, that's an Unresolved Object you missed. Go back to step 2.
-  - If the Script Sequence failed on anything else, it fails on its own. Tell the user and stop.
-  - If the Pipeline failed, treat it like `not_equivalent`.
+- **`error`**: the Pipeline failed to build, or a Source Script wasn't found. Treat a build failure like `not_equivalent`.
 - **`needs_confirmation`**: tell the user the copy size. Re-run with `--allow-large` or `--mode static`, as they choose.
 
 ## 5. Report
@@ -95,4 +94,4 @@ Done when every dropped or changed line, every Unresolved Object decision and ev
 
 ## 6. Enhancement wizard
 
-Only after `equivalent` or `static_pass`: offer Enhancements, one at a time, following `references/enhancements.md`. The user can decline them all, in which case the work is complete. If any Enhancement was kept, run `glimpse.R` once more at the end so the user sees the final graph.
+Only after `equivalent` or `static_pass`, and never when unchecked: offer Enhancements, one at a time, following `references/enhancements.md`. The user can decline them all, in which case the work is complete. If any Enhancement was kept, run `glimpse.R` once more at the end so the user sees the final graph.

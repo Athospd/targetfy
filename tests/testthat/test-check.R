@@ -69,10 +69,16 @@ test_that("Handoff Files are excluded and Script Sequences run in order", {
   expect_equal(results[["out/totals.csv"]], "match")
 })
 
-test_that("an Unresolved Object makes the Script Sequence fail", {
+test_that("scripts that fail on their own fall back to the Static Check", {
   res <- run_fixture("unresolved", "script.R")
-  expect_equal(res$status, "error")
-  expect_match(res$errors[[1]], "model_data")
+  expect_equal(res$status, "static_pass")
+  expect_equal(res$equivalence, "unverified")
+  expect_equal(res$script_failure$script, "script.R")
+  expect_equal(res$script_failure$line, 3)
+  expect_match(res$script_failure$message, "model_data")
+  after <- vapply(res$targets, `[[`, NA, "after_failure")
+  names(after) <- vapply(res$targets, `[[`, "", "target")
+  expect_equal(after[c("a", "b", "y")], c(a = FALSE, b = FALSE, y = TRUE))
 })
 
 test_that("static mode never runs anything and marks Equivalence unverified", {

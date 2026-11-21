@@ -10,7 +10,8 @@
 #
 # Never touches DIR: every run happens in throwaway copies.
 #
-# Exit codes: 0 equivalent / static_pass, 1 not_equivalent / static_fail,
+# Exit codes: 0 equivalent / static_pass (also when the scripts themselves
+#             fail: see script_failure), 1 not_equivalent / static_fail,
 #             2 error, 3 needs_confirmation (copy too large).
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
@@ -78,15 +79,32 @@ run_scripts_session <- function(wd, scripts, names, out) {
   stubs$install.packages <- function(...) invisible(NULL)
   stubs$View <- function(...) invisible(NULL)
   attach(stubs, name = "targetfy_stubs", warn.conflicts = FALSE)
-  err <- NULL
-  tryCatch(
-    for (s in scripts) sys.source(s, envir = globalenv(), keep.source = FALSE),
-    error = function(e) err <<- conditionMessage(e)
-  )
+  # Evaluate one top-level expression at a time, so a failure can be
+  # reported with its script and line.
+  failure <- NULL
+  for (s in scripts) {
+    exprs <- tryCatch(parse(s, keep.source = TRUE), error = function(e) e)
+    if (inherits(exprs, "error")) {
+      failure <- list(script = s, line = NA, message = conditionMessage(exprs))
+      break
+    }
+    refs <- attr(exprs, "srcref")
+    for (i in seq_along(exprs)) {
+      msg <- tryCatch({ eval(exprs[[i]], globalenv()); NULL },
+                      error = function(e) conditionMessage(e))
+      if (!is.null(msg)) {
+        failure <- list(script = s, line = refs[[i]][[1]], message = msg,
+                        code = paste(as.character(refs[[i]]), collapse = "
+"))
+        break
+      }
+    }
+    if (!is.null(failure)) break
+  }
   present <- names[vapply(names, exists, logical(1), envir = globalenv(),
                           inherits = FALSE)]
   saveRDS(mget(present, envir = globalenv()), out)
-  list(error = err, present = present)
+  list(failure = failure, present = present)
 }
 
 run_scripts <- function(wd, scripts, names, out) {
@@ -299,9 +317,19 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
   before <- file_hashes(script_dir)
   snapshot <- file.path(root, "script-objects.rds")
   run <- run_scripts(script_dir, scripts, as.character(step_names), snapshot)
-  if (!is.null(run$error)) {
-    result$status <- "error"
-    result$errors <- list(paste("Script Sequence failed:", run$error))
+  if (!is.null(run$failure)) {
+    # The scripts fail on their own: no comparison is possible, so the
+    # result falls back to the Static Check. Steps whose variable existed
+    # when the scripts stopped were reached; the rest come after the failure.
+    result$status <- "static_pass"
+    result$equivalence <- "unverified"
+    result$script_failure <- run$failure
+    for (name in result$static$manifest$name) {
+      step <- target_map[[name]]
+      result$targets[[length(result$targets) + 1]] <- list(
+        target = name, step = step %||% NA, result = "unverified",
+        after_failure = if (is.null(step)) NA else !step %in% run$present)
+    }
     return(result)
   }
   script_written <- written_files(before, file_hashes(script_dir))

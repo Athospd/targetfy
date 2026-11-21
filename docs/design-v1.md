@@ -17,6 +17,12 @@ A **Claude Code skill** (`/targetfy`) that turns a **Script Sequence** (one or m
 3. It never installs packages. If `renv.lock` exists, the check runs under it.
 4. It never guesses which files belong to the analysis. The user lists the Script Sequence, and the order given is the order the scripts run.
 
+5. **targetfy keeps going.** Once preflight has fixed the Script Sequence, it always writes the Generated Files and the report. What blocks verification lowers how much is checked, and is flagged; it never stops the Conversion:
+   - Source Scripts that fail to run (a missing package, a missing data file, a bug) → Static Check, with the failing script, line and error reported, and the Targets after the failure point marked.
+   - R or targetfy's own packages missing → files written, nothing checked, status "not checked".
+   - An Unresolved Object found nowhere → assumed to exist and flagged, without asking.
+   The only stops are an unsupported file type and the user declining a question.
+
 ## Conversion
 
 - One Target per **Step**, meaning a meaningful object, not one per assignment. Size never blocks a Conversion: any Script Sequence that passes preflight is converted, however small. A chain of in-place modifications to the same variable becomes one Target.
@@ -76,7 +82,8 @@ Rscript scripts/check.R --project DIR --scripts a.R[,b.R] [--pipeline targets_<n
 - **Output**: JSON with a `status` per Target and per file written. The overall `status` and exit code are:
   - `equivalent` or `static_pass`: 0
   - `not_equivalent` or `static_fail`: 1
-  - `error` (the Script Sequence or Pipeline failed to run): 2
+  - `error` (the Pipeline failed to build, or a Source Script wasn't found): 2
+  - When the Source Scripts fail to run on their own, the status is `static_pass` or `static_fail` with `equivalence: "unverified"` and a `script_failure` (script, line, message, code). Each mapped Target then carries `after_failure`: whether its Step comes after the failure point.
   - `needs_confirmation` (the copy is over the size limit): 3
 - **Script run**: the Script Sequence runs in a fresh R session. `setwd`, `install.packages` and `View` are replaced with no-ops, attached on the search path so that `rm(list = ls())` can't remove them.
 - **Comparison**: before comparing, a model's stored `call`, environments and formula environments are removed. These always differ once code is wrapped in functions.
