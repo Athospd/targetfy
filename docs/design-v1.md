@@ -13,7 +13,7 @@ A **Claude Code skill** (`/targetfy`) that turns a **Script Sequence** (one or m
 ## Hard rules
 
 1. **targetfy never modifies any existing file.** It only writes Generated Files: the Pipeline script, `R_targets/` (or `R/`), the Conversion Report and the Step Map.
-2. An existing `_targets.R` never blocks a Conversion. targetfy writes `targets_<name>.R` instead, with its own store `_targets_<name>/`, Step Map `targetfy-map_<name>.json` and report `targetfy-report_<name>.md`, and tells the user. `<name>` is the Source Script's name, or a bundle name the user picks for a Script Sequence. If `R/` already contains files, functions go in `R_targets/`.
+2. An existing `_targets.R` never blocks a Conversion. targetfy writes `targets_<name>.R` instead, with its own store `_targets_<name>/`, Step Map `targetfy-map_<name>.json` and report `targetfy-report_<name>.md`, and tells the user. `<name>` is the name of the first Source Script in the Script Sequence. If `R/` already contains files, functions go in `R_targets/`.
 3. It never installs packages. If `renv.lock` exists, the check runs under it.
 4. It never guesses which files belong to the analysis. The user lists the Script Sequence, and the order given is the order the scripts run.
 
@@ -81,6 +81,10 @@ Rscript scripts/check.R --project DIR --scripts a.R[,b.R] [--pipeline targets_<n
 - **Script run**: the Script Sequence runs in a fresh R session. `setwd`, `install.packages` and `View` are replaced with no-ops, attached on the search path so that `rm(list = ls())` can't remove them.
 - **Comparison**: before comparing, a model's stored `call`, environments and formula environments are removed. These always differ once code is wrapped in functions.
 - **Reseed rebuild**: the Target is rebuilt in a separate store, with the seed set *before* the Targets are defined. targets fixes each Target's seed when it is defined.
+
+### Graph (`scripts/glimpse.R`)
+
+After the report, and again after the wizard if any Enhancement was kept, the skill shows `targets::tar_glimpse(script = <Pipeline script>)`. The page is saved to the system temp folder (never the project, and not R's session temp folder, which R deletes on exit before the browser loads the page) and opened in the browser. `tar_glimpse()` only reads the Pipeline script; it builds nothing.
 
 ## Enhancement wizard
 

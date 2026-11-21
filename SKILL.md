@@ -26,7 +26,7 @@ Turn a **Script Sequence** (one or more `.R` files, listed by the user, in run o
    | Step Map | `targetfy-map.json` | `targetfy-map_<name>.json` |
    | Conversion Report | `targetfy-report.md` | `targetfy-report_<name>.md` |
 
-   - `<name>` is the Source Script's file name without `.R`: `analysis.R` gives `targets_analysis.R`. For a Script Sequence of several files, ask the user for a short name for the bundle, and suggest the project folder's name.
+   - `<name>` is the file name, without `.R`, of the first Source Script in the Script Sequence: `analysis.R` gives `targets_analysis.R`, and a Sequence starting with `01_load.R` gives `targets_01_load.R`.
    - When `_targets.R` exists, tell the user: "Since `_targets.R` already exists, I'm creating `targets_<name>.R` instead." Its own store keeps the existing pipeline's cached results untouched.
    - If the chosen Step Map or Conversion Report already exists, it's an earlier targetfy run. Ask before replacing those files.
    - Functions go in `R/` if it's absent or empty, otherwise in `R_targets/`. Tell the user which one.
@@ -83,8 +83,16 @@ Read `result.json` and act on its `status`:
 
 Write the Conversion Report following `references/report.md`, and give the user a short summary in chat: the status, the number of Targets and their results, the lines dropped, and anything left unverified.
 
-Done when every dropped or changed line, every Unresolved Object decision and every Target's check result appears in the report.
+Then show the Pipeline's graph, whatever the check's status:
+
+```
+Rscript <skill folder>/scripts/glimpse.R --project <project> --pipeline <Pipeline script>
+```
+
+It saves `targets::tar_glimpse()` as an HTML page in the system temp folder, opens it in the browser and prints its path. Give the user that path. If it reports a missing package (`visNetwork`), mention it in one line and carry on.
+
+Done when every dropped or changed line, every Unresolved Object decision and every Target's check result appears in the report, and the graph has been shown.
 
 ## 6. Enhancement wizard
 
-Only after `equivalent` or `static_pass`: offer Enhancements, one at a time, following `references/enhancements.md`. The user can decline them all, in which case the work is complete.
+Only after `equivalent` or `static_pass`: offer Enhancements, one at a time, following `references/enhancements.md`. The user can decline them all, in which case the work is complete. If any Enhancement was kept, run `glimpse.R` once more at the end so the user sees the final graph.
