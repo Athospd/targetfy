@@ -12,15 +12,15 @@ A **Claude Code skill** (`/targetfy`) that turns a **Script Sequence** (one or m
 
 ## Hard rules
 
-1. **targetfy never modifies any existing file.** It only writes Generated Files: `_targets.R`, `R_targets/` (or `R/`), `targetfy-report.md` and `targetfy-map.json` (the Step Map).
-2. It refuses to proceed if `_targets.R` exists, and asks for an alternative folder if `R/` already contains files.
+1. **targetfy never modifies any existing file.** It only writes Generated Files: the Pipeline script, `R_targets/` (or `R/`), the Conversion Report and the Step Map.
+2. An existing `_targets.R` never blocks a Conversion. targetfy writes `targets_<name>.R` instead, with its own store `_targets_<name>/`, Step Map `targetfy-map_<name>.json` and report `targetfy-report_<name>.md`, and tells the user. `<name>` is the Source Script's name, or a bundle name the user picks for a Script Sequence. If `R/` already contains files, functions go in `R_targets/`.
 3. It never installs packages. If `renv.lock` exists, the check runs under it.
 4. It never guesses which files belong to the analysis. The user lists the Script Sequence, and the order given is the order the scripts run.
 
 ## Conversion
 
 - One Target per **Step**, meaning a meaningful object, not one per assignment. Size never blocks a Conversion: any Script Sequence that passes preflight is converted, however small. A chain of in-place modifications to the same variable becomes one Target.
-- Logic goes into functions in `R_targets/`, one file per Source Script, named `<script name>_functions.R`. `_targets.R` holds only short `tar_target(name, fn(deps))` calls and loads the functions with `tar_source()`.
+- Logic goes into functions in `R_targets/`, one file per Source Script, named `<script name>_functions.R`. The Pipeline script holds only short `tar_target(name, fn(deps))` calls and loads the functions with `tar_source()`.
 - Each `library()` call becomes an entry in `tar_option_set(packages = ...)`. `pkg::fn` calls stay as they are.
 - Input files are tracked with `tar_file_read()` and output files become file Targets.
 - Lines that don't belong in a Pipeline (`setwd`, `rm(list = ls())`, `install.packages`, `View`, `readline`, `browser`, bare `print`/`head`) are dropped. Each is listed with its line number and the reason in the **Conversion Report**.
@@ -62,7 +62,7 @@ Ordering problems (a later script defines something an earlier one needs) are fl
 ### The check script (`scripts/check.R`)
 
 ```
-Rscript scripts/check.R --project DIR --scripts a.R[,b.R] [--map map.json]
+Rscript scripts/check.R --project DIR --scripts a.R[,b.R] [--pipeline targets_<name>.R] [--map map.json]
         [--mode equivalence|static] [--max-copy-mb 1024] [--allow-large]
         [--keep] [--out result.json]
 ```

@@ -23,7 +23,7 @@ coefs <- summary(model)$coefficients  # Step `model_summary`
 
 - Put each Step's logic in a function in the functions folder (`R/` or `R_targets/`). Pass data in as arguments, never through globals.
 - Name each functions file after the Source Script its Steps come from: `<script name>_functions.R`. For example, the Steps of `simple_chain_of_operations.R` go in `R/simple_chain_of_operations_functions.R`. A Script Sequence gets one functions file per Source Script.
-- `_targets.R` holds only `library(targets)`, `library(tarchetypes)`, `tar_source("<functions folder>")`, `tar_option_set(packages = ...)` and short Target calls like `tar_target(name, fn(dep1, dep2))`. Always pass the folder to `tar_source()`, even when it's `R/`.
+- The Pipeline script (`_targets.R` or `targets_<name>.R`) holds only `library(targets)`, `library(tarchetypes)`, `tar_source("<functions folder>")`, `tar_option_set(packages = ...)` and short Target calls like `tar_target(name, fn(dep1, dep2))`. Always pass the folder to `tar_source()`, even when it's `R/`.
 - **Packages:** every package the scripts attach with `library()` or `require()` goes into `tar_option_set(packages = c(...))`. Calls like `pkg::fn()` stay as they are.
 - **Input files:** use `tar_file_read(name, "path", read = reader(!!.x))`, which creates `name_file` and `name`.
 - **Output files:** use `tar_file(name, write_fn(value, "path"))`, where `write_fn` writes the file, creates its folder if needed, and returns the path.
@@ -39,7 +39,7 @@ These don't belong in a Pipeline. Drop each one and record it, with its file, li
 
 If a dropped line computes something a later line uses, it's a Step and stays.
 
-## Step Map (`targetfy-map.json`)
+## Step Map (`targetfy-map.json` or `targetfy-map_<name>.json`)
 
 ```json
 {

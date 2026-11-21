@@ -71,7 +71,7 @@ A single node of a Pipeline: one R object or tracked file, declared with `tar_ta
 _Avoid_: step, task, node (outside graph discussions)
 
 **Pipeline**:
-The list of Targets that defines a workflow, written to `_targets.R`.
+The list of Targets that defines a workflow, written to `_targets.R`, or to `targets_<name>.R` when `_targets.R` already exists.
 _Avoid_: workflow, DAG definition
 
 **Dependency Graph**:

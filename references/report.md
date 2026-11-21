@@ -1,4 +1,4 @@
-# Conversion Report (`targetfy-report.md`)
+# Conversion Report (`targetfy-report.md` or `targetfy-report_<name>.md`)
 
 Write it for the user. Every section is required; write "None" for an empty one.
 
@@ -40,6 +40,7 @@ Filled in by the Enhancement wizard: each one offered, accepted or declined, and
 
 ## Run it
 `targets::tar_make()` builds the Pipeline; `targets::tar_visnetwork()` shows the graph.
+(For `targets_<name>.R`, pass the script and its store: `targets::tar_make(script = "targets_<name>.R", store = "_targets_<name>")`, and the same two arguments to `tar_visnetwork()` and `tar_read()`.)
 ```
 
 Take the check columns from the latest `result.json`. Never upgrade a result: a `structure_match` is reported as "structure match", not "match".

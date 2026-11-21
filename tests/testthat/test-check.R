@@ -110,3 +110,32 @@ test_that("the command line reads the Step Map from the project by default", {
   expect_equal(code, 1)
   expect_equal(jsonlite::read_json(out)$status, "not_equivalent")
 })
+
+test_that("an existing _targets.R is left alone when targets_<name>.R is checked", {
+  dir <- file.path(fixtures, "existing_pipeline")
+  project <- file.path(dir, "project")
+  before <- check_env$file_hashes(project)
+  map <- jsonlite::read_json(file.path(project, "targetfy-map_analysis.json"),
+                             simplifyVector = FALSE)
+  res <- check_env$targetfy_check(project, "analysis.R", map,
+                                  pipeline = "targets_analysis.R")
+  expect_equal(res$status, "equivalent")
+  expect_equal(res$store, "_targets_analysis")
+  expect_identical(check_env$file_hashes(project), before)
+})
+
+test_that("the command line finds targetfy-map_<name>.json for targets_<name>.R", {
+  rscript <- file.path(R.home("bin"), "Rscript")
+  project <- file.path(fixtures, "existing_pipeline", "project")
+  out <- tempfile(fileext = ".json")
+  code <- system2(rscript, c(shQuote(check_script),
+                             "--project", shQuote(project),
+                             "--scripts", "analysis.R",
+                             "--pipeline", "targets_analysis.R",
+                             "--out", shQuote(out)),
+                  stdout = FALSE, stderr = FALSE)
+  expect_equal(code, 0)
+  res <- jsonlite::read_json(out)
+  expect_equal(res$status, "equivalent")
+  expect_true(any(vapply(res$targets, function(t) t$result == "match", TRUE)))
+})

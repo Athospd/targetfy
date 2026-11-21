@@ -8,7 +8,7 @@ allowed-tools: Read, Grep, Glob, Write, Edit, Bash
 
 Turn a **Script Sequence** (one or more `.R` files, listed by the user, in run order) into a `{targets}` **Pipeline** that is **Equivalent** to it: it produces the same final objects and written files. Terms are defined in `GLOSSARY.md` in this skill's folder. The bundled R check (`scripts/check.R`) decides whether a Conversion is accepted; your own judgement about Equivalence never replaces it.
 
-**Hard guardrail:** write only Generated Files: `_targets.R`, the functions folder, `targetfy-map.json` and `targetfy-report.md`. Leave every existing file exactly as it is: Source Scripts, sourced helpers, data, `.Rprofile`, `renv.lock`. Use Edit only on Generated Files. Install nothing: if a package is missing, say so and stop.
+**Hard guardrail:** write only Generated Files: the Pipeline script, the functions folder, the Step Map and the Conversion Report, under the names chosen in preflight. Leave every existing file exactly as it is: Source Scripts, sourced helpers, data, `.Rprofile`, `renv.lock`. Use Edit only on Generated Files. Install nothing: if a package is missing, say so and stop.
 
 ## 1. Preflight
 
@@ -17,12 +17,21 @@ Turn a **Script Sequence** (one or more `.R` files, listed by the user, in run o
 3. **Accept only `.R` files.** Stop with a clear message for:
    - `.Rmd`, `.qmd`, `.ipynb`: planned, not yet supported.
    - `.Rnw`, files inside an R package (a `DESCRIPTION` file next to `R/`), Shiny apps: these aren't linear analyses.
-4. **Check the target folders.**
-   - If `_targets.R` exists, stop. Converting would overwrite it.
-   - If `targetfy-map.json` or `targetfy-report.md` exists, it's an earlier targetfy run. Ask before replacing them.
+4. **Choose the Generated File names.**
+
+   | | `_targets.R` absent | `_targets.R` exists |
+   |---|---|---|
+   | Pipeline script | `_targets.R` | `targets_<name>.R` |
+   | Store | `_targets/` | `_targets_<name>/` |
+   | Step Map | `targetfy-map.json` | `targetfy-map_<name>.json` |
+   | Conversion Report | `targetfy-report.md` | `targetfy-report_<name>.md` |
+
+   - `<name>` is the Source Script's file name without `.R`: `analysis.R` gives `targets_analysis.R`. For a Script Sequence of several files, ask the user for a short name for the bundle, and suggest the project folder's name.
+   - When `_targets.R` exists, tell the user: "Since `_targets.R` already exists, I'm creating `targets_<name>.R` instead." Its own store keeps the existing pipeline's cached results untouched.
+   - If the chosen Step Map or Conversion Report already exists, it's an earlier targetfy run. Ask before replacing those files.
    - Functions go in `R/` if it's absent or empty, otherwise in `R_targets/`. Tell the user which one.
 
-Done when R and its packages are confirmed, the Script Sequence is fixed, and the functions folder is chosen.
+Done when R and its packages are confirmed, the Script Sequence is fixed, and every Generated File name is chosen.
 
 Convert every Script Sequence that passes preflight, however small or simple. Preflight's stops are the only reasons not to convert: a three-line script still gets its Pipeline. If the Pipeline gains little, say so in the report's summary and convert anyway.
 
@@ -46,8 +55,8 @@ Done when every name the scripts use is accounted for, either defined in the scr
 
 Following `references/conversion.md`, write:
 - one functions file per Source Script (`<script name>_functions.R`);
-- `_targets.R`;
-- `targetfy-map.json`, the **Step Map**.
+- the Pipeline script;
+- the **Step Map**.
 
 ## 4. Check
 
@@ -57,7 +66,8 @@ Decide the mode:
 
 ```
 Rscript <skill folder>/scripts/check.R --project <project> --scripts a.R,b.R \
-        [--mode static] [--allow-large] --out <temp folder>/result.json
+        [--pipeline targets_<name>.R] [--mode static] [--allow-large] \
+        --out <temp folder>/result.json
 ```
 
 Read `result.json` and act on its `status`:
@@ -71,7 +81,7 @@ Read `result.json` and act on its `status`:
 
 ## 5. Report
 
-Write `targetfy-report.md` following `references/report.md`, and give the user a short summary in chat: the status, the number of Targets and their results, the lines dropped, and anything left unverified.
+Write the Conversion Report following `references/report.md`, and give the user a short summary in chat: the status, the number of Targets and their results, the lines dropped, and anything left unverified.
 
 Done when every dropped or changed line, every Unresolved Object decision and every Target's check result appears in the report.
 

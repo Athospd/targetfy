@@ -2,7 +2,9 @@
 #
 # Usage:
 #   Rscript check.R --project DIR --scripts a.R[,b.R...]
-#                   [--map map.json]   (default: DIR/targetfy-map.json)
+#                   [--pipeline _targets.R]   (or targets_<name>.R)
+#                   [--map map.json]   (default: the Pipeline's Step Map,
+#                                       DIR/targetfy-map[_<name>].json)
 #                   [--mode equivalence|static] [--max-copy-mb 1024]
 #                   [--allow-large] [--keep] [--out result.json]
 #
@@ -26,7 +28,8 @@ RANDOM_FUNS <- c(
 LOOSE_FILE_EXT <- c("pdf", "png", "jpg", "jpeg", "svg", "tif", "tiff",
                     "xlsx", "xls", "docx", "pptx", "html", "rds", "rdata")
 
-COPY_EXCLUDE <- c("^\\.git/", "^_targets/", "^_targets_reseed/",
+# "^_targets[^/]*/" covers every store: _targets/, _targets_<name>/, reseed.
+COPY_EXCLUDE <- c("^\\.git/", "^_targets[^/]*/",
                   "^\\.Rproj\\.user/", "^renv/library/", "^renv/staging/")
 
 # ---------------------------------------------------------------------------
@@ -100,7 +103,22 @@ with_wd <- function(dir, code) {
   force(code)
 }
 
-static_check <- function(wd) {
+# The store that goes with a Pipeline script: _targets.R uses _targets/,
+# targets_<name>.R uses _targets_<name>/ so it never touches another store.
+store_for <- function(pipeline) {
+  if (pipeline == "_targets.R") "_targets"
+  else paste0("_", tools::file_path_sans_ext(basename(pipeline)))
+}
+
+# The Step Map that goes with a Pipeline script: targetfy-map.json, or
+# targetfy-map_<name>.json for targets_<name>.R.
+map_for <- function(pipeline) {
+  if (pipeline == "_targets.R") return("targetfy-map.json")
+  name <- sub("^targets_", "", tools::file_path_sans_ext(basename(pipeline)))
+  paste0("targetfy-map_", name, ".json")
+}
+
+static_check <- function(wd, pipeline = "_targets.R") {
   out <- list(parse_errors = list(), validate = NULL, manifest = NULL)
   r_files <- list.files(wd, pattern = "\\.[Rr]$", recursive = TRUE)
   for (f in r_files) {
@@ -108,15 +126,16 @@ static_check <- function(wd) {
                     error = function(e) conditionMessage(e))
     if (!is.null(msg)) out$parse_errors[[f]] <- msg
   }
-  if (!file.exists(file.path(wd, "_targets.R"))) {
-    out$validate <- "_targets.R not found"
+  if (!file.exists(file.path(wd, pipeline))) {
+    out$validate <- paste(pipeline, "not found")
     return(out)
   }
   with_wd(wd, {
-    out$validate <- tryCatch({ targets::tar_validate(); "ok" },
+    out$validate <- tryCatch({ targets::tar_validate(script = pipeline); "ok" },
                              error = function(e) conditionMessage(e))
     out$manifest <- tryCatch(
-      as.data.frame(targets::tar_manifest(fields = c("name", "command"))),
+      as.data.frame(targets::tar_manifest(fields = c("name", "command"),
+                                          script = pipeline)),
       error = function(e) conditionMessage(e)
     )
   })
@@ -147,7 +166,7 @@ read_target <- function(wd, name, store = "_targets") {
 
 # Rebuilds one Target (and what it depends on) in a separate store with a
 # different global seed. Returns the new value, or an error condition.
-rebuild_with_new_seed <- function(wd, name) {
+rebuild_with_new_seed <- function(wd, name, pipeline = "_targets.R") {
   wrapper <- file.path(wd, "_targets_reseed.R")
   # Targets take their seed when defined, so set it first, and keep the
   # Pipeline's own tar_option_set() calls from overriding it.
@@ -158,7 +177,7 @@ rebuild_with_new_seed <- function(wd, name) {
     "  targets::tar_option_set(seed = 987654321L)",
     "}",
     "targets::tar_option_set(seed = 987654321L)",
-    "source('_targets.R', local = .targetfy_env)$value"
+    sprintf("source('%s', local = .targetfy_env)$value", pipeline)
   ), wrapper)
   err <- build_pipeline(wd, script = "_targets_reseed.R",
                         store = "_targets_reseed", names = name)
@@ -182,13 +201,13 @@ uses_random <- function(command, globals) {
 
 # Bodies of the Pipeline's own functions, by name. Loaded in a fresh session
 # because tar_source() puts functions in the global environment.
-load_globals <- function(wd) {
-  tryCatch(callr::r(function(wd) {
+load_globals <- function(wd, pipeline = "_targets.R") {
+  tryCatch(callr::r(function(wd, pipeline) {
     setwd(wd)
-    targets::tar_load_globals(envir = globalenv())
+    targets::tar_load_globals(envir = globalenv(), script = pipeline)
     objs <- mget(ls(globalenv(), all.names = TRUE), envir = globalenv())
     lapply(Filter(is.function, objs), body)
-  }, args = list(wd)), error = function(e) list())
+  }, args = list(wd, pipeline)), error = function(e) list())
 }
 
 # ---------------------------------------------------------------------------
@@ -233,9 +252,10 @@ structure_match <- function(a, b) identical(structure_of(a), structure_of(b))
 
 targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
                            max_copy_mb = 1024, allow_large = FALSE,
-                           keep = FALSE) {
+                           keep = FALSE, pipeline = "_targets.R") {
+  store <- store_for(pipeline)
   project <- normalizePath(project, winslash = "/", mustWork = TRUE)
-  result <- list(mode = mode, status = NULL, static = NULL, targets = list(),
+  result <- list(mode = mode, pipeline = pipeline, store = store, status = NULL, static = NULL, targets = list(),
                  files = list(), errors = list())
   missing_scripts <- scripts[!file.exists(file.path(project, scripts))]
   if (length(missing_scripts)) {
@@ -260,7 +280,7 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
   else result$workdir <- root
   pipe_dir <- copy_project(project, file.path(root, "pipeline"), files)
 
-  result$static <- static_check(pipe_dir)
+  result$static <- static_check(pipe_dir, pipeline)
   if (mode == "static") {
     result$status <- if (static_ok(result$static)) "static_pass" else "static_fail"
     result$equivalence <- "unverified"
@@ -289,7 +309,7 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
 
   # 2. Build the Pipeline in its own copy.
   pipe_before <- file_hashes(pipe_dir)
-  err <- build_pipeline(pipe_dir)
+  err <- build_pipeline(pipe_dir, script = pipeline, store = store)
   if (!is.null(err)) {
     result$status <- "error"
     result$errors <- list(paste("Pipeline failed:", err))
@@ -299,7 +319,7 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
 
   # 3. Compare Targets with their Steps.
   manifest <- result$static$manifest
-  globals <- load_globals(pipe_dir)
+  globals <- load_globals(pipe_dir, pipeline)
   flagged <- as.character(unlist(map$stochastic))
   for (i in seq_len(nrow(manifest))) {
     name <- manifest$name[[i]]
@@ -321,13 +341,13 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
     } else if (!step %in% names(script_objects)) {
       entry$result <- "step_missing"
     } else {
-      value <- read_target(pipe_dir, name)
+      value <- read_target(pipe_dir, name, store)
       expected <- script_objects[[step]]
       if (!entry$stochastic && values_match(value, expected)) {
         entry$result <- "match"
       } else {
         if (!entry$stochastic) {
-          reseeded <- rebuild_with_new_seed(pipe_dir, name)
+          reseeded <- rebuild_with_new_seed(pipe_dir, name, pipeline)
           if (!inherits(reseeded, "error") && !values_match(reseeded, value)) {
             entry$stochastic <- TRUE
             entry$stochastic_reason <- "value changes with the seed"
@@ -381,7 +401,7 @@ EXIT_CODES <- c(equivalent = 0, static_pass = 0, not_equivalent = 1,
                 static_fail = 1, error = 2, needs_confirmation = 3)
 
 parse_args <- function(args) {
-  opts <- list(mode = "equivalence", max_copy_mb = 1024, allow_large = FALSE,
+  opts <- list(pipeline = "_targets.R", mode = "equivalence", max_copy_mb = 1024, allow_large = FALSE,
                keep = FALSE, map = NULL, out = NULL)
   i <- 1
   while (i <= length(args)) {
@@ -402,12 +422,13 @@ parse_args <- function(args) {
 
 main <- function(args = commandArgs(trailingOnly = TRUE)) {
   opts <- parse_args(args)
-  map_path <- opts$map %||% file.path(opts$project, "targetfy-map.json")
+  map_path <- opts$map %||% file.path(opts$project, map_for(opts$pipeline))
   map <- if (file.exists(map_path))
     jsonlite::read_json(map_path, simplifyVector = FALSE) else list()
   result <- tryCatch(
     targetfy_check(opts$project, opts$scripts, map, opts$mode,
-                   opts$max_copy_mb, opts$allow_large, opts$keep),
+                   opts$max_copy_mb, opts$allow_large, opts$keep,
+                   opts$pipeline),
     error = function(e) list(status = "error", errors = list(conditionMessage(e)))
   )
   json <- jsonlite::toJSON(result, auto_unbox = TRUE, pretty = TRUE,
