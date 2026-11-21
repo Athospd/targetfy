@@ -12,7 +12,7 @@ A **Claude Code skill** (`/targetfy`) that turns a **Script Sequence** (one or m
 
 ## Hard rules
 
-1. **targetfy never modifies any existing file.** It only writes Generated Files: `_targets.R`, `R_targets/` (or `R/`), and `targetfy-report.md`.
+1. **targetfy never modifies any existing file.** It only writes Generated Files: `_targets.R`, `R_targets/` (or `R/`), `targetfy-report.md` and `targetfy-map.json` (the Step Map).
 2. It refuses to proceed if `_targets.R` exists, and asks for an alternative folder if `R/` already contains files.
 3. It never installs packages. If `renv.lock` exists, the check runs under it.
 4. It never guesses which files belong to the analysis. The user lists the Script Sequence, and the order given is the order the scripts run.
@@ -67,7 +67,7 @@ Rscript scripts/check.R --project DIR --scripts a.R[,b.R] [--map map.json]
         [--keep] [--out result.json]
 ```
 
-- **Map**: the Conversion writes this file to tell the check which Step each Target replaces. Targets not listed in it are reported `not_compared`:
+- **Step Map** (`targetfy-map.json`, one of the Generated Files and the default for `--map`): it records which Step each Target replaces. Targets not listed in it are reported `not_compared`:
   ```json
   {"targets": {"sales_clean": "df", "model": "model"},
    "handoff_files": ["tmp/df.rds"],
@@ -92,6 +92,8 @@ v1 catalog:
 3. **Parallel workers**: `{crew}` workers, offered only once branching or independent Targets make it worthwhile.
 
 ## Out of scope for v1 (planned)
+
+- **A granularity setting for Targets.** v1 uses one fixed rule: one Target per Step. A later option could let the user choose coarser Targets (fewer Targets, each bundling several Steps) or finer ones (closer to one per statement, more caching but risking huge numbers of tiny Targets). The open question is how the Step Map and the Equivalence Check cope when one Target covers several Steps, or one Step is split across several Targets.
 
 - Stricter comparison levels, for example with `{waldo}`.
 - `.Rmd`, `.qmd` and `.ipynb` (R kernel) as **analysis notebooks**: the code chunks or cells become the Source Script and the prose is dropped.

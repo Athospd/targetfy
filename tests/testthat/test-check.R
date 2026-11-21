@@ -6,7 +6,8 @@ sys.source(check_script, envir = check_env)
 
 run_fixture <- function(name, scripts, ...) {
   dir <- file.path(fixtures, name)
-  map <- jsonlite::read_json(file.path(dir, "map.json"), simplifyVector = FALSE)
+  map <- jsonlite::read_json(file.path(dir, "project", "targetfy-map.json"),
+                             simplifyVector = FALSE)
   check_env$targetfy_check(file.path(dir, "project"), scripts, map, ...)
 }
 
@@ -97,14 +98,13 @@ test_that("a missing Source Script is an error", {
   expect_equal(res$status, "error")
 })
 
-test_that("the command line returns JSON and the right exit code", {
+test_that("the command line reads the Step Map from the project by default", {
   rscript <- file.path(R.home("bin"), "Rscript")
   dir <- file.path(fixtures, "sales_bug")
   out <- tempfile(fileext = ".json")
   code <- system2(rscript, c(shQuote(check_script),
                              "--project", shQuote(file.path(dir, "project")),
                              "--scripts", "analysis.R",
-                             "--map", shQuote(file.path(dir, "map.json")),
                              "--out", shQuote(out)),
                   stdout = FALSE, stderr = FALSE)
   expect_equal(code, 1)

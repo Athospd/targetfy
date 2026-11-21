@@ -52,12 +52,16 @@ _Avoid_: random target, non-deterministic step
 The record, shown in chat and saved among the Generated Files, of every line from the Source Script that targetfy left out or changed, why, and how each Target fared in the check.
 _Avoid_: log, changelog
 
+**Step Map**:
+The record, saved among the Generated Files, of which Step each Target replaces; it tells the Equivalence Check what to compare.
+_Avoid_: mapping, lineage
+
 **Enhancement**:
 An optional, follow-up pass over an existing Pipeline that adds a `{targets}` feature (Branching, parallelism, storage format, external sources) without breaking Equivalence.
 _Avoid_: optimization, upgrade
 
 **Generated Files**:
-The new files targetfy writes (`_targets.R`, `R/*.R`) next to the Source Script; targetfy never modifies any existing file.
+The new files targetfy writes next to the Source Script (the Pipeline, its functions, the Conversion Report and the Step Map); targetfy never modifies any existing file.
 _Avoid_: output, artifacts
 
 ### Output (borrowed from `{targets}`)

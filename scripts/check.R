@@ -1,7 +1,8 @@
 # targetfy check: decides whether a Conversion is accepted (see docs/adr/0001).
 #
 # Usage:
-#   Rscript check.R --project DIR --scripts a.R[,b.R...] [--map map.json]
+#   Rscript check.R --project DIR --scripts a.R[,b.R...]
+#                   [--map map.json]   (default: DIR/targetfy-map.json)
 #                   [--mode equivalence|static] [--max-copy-mb 1024]
 #                   [--allow-large] [--keep] [--out result.json]
 #
@@ -401,8 +402,9 @@ parse_args <- function(args) {
 
 main <- function(args = commandArgs(trailingOnly = TRUE)) {
   opts <- parse_args(args)
-  map <- if (is.null(opts$map)) list()
-    else jsonlite::read_json(opts$map, simplifyVector = FALSE)
+  map_path <- opts$map %||% file.path(opts$project, "targetfy-map.json")
+  map <- if (file.exists(map_path))
+    jsonlite::read_json(map_path, simplifyVector = FALSE) else list()
   result <- tryCatch(
     targetfy_check(opts$project, opts$scripts, map, opts$mode,
                    opts$max_copy_mb, opts$allow_large, opts$keep),
