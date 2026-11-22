@@ -1,4 +1,4 @@
-# targetfy
+# targetfy <img src="man/figures/logo.png" align="right" height="139" alt="targetfy hex sticker" />
 
 A Claude Code skill that turns existing R scripts into an equivalent [`{targets}`](https://books.ropensci.org/targets/) pipeline, then offers optional Enhancements (dynamic branching, storage formats, parallel workers).
 

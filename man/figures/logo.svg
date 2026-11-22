@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="518" height="600" viewBox="0 0 518 600">
+  <!-- Hexagon: pointy top, standard 518x600 sticker. -->
+  <polygon points="259,12 506,156 506,444 259,588 12,444 12,156"
+           fill="#1E2A3F" stroke="#41C7B0" stroke-width="22" stroke-linejoin="round"/>
+
+  <g transform="translate(0,16)">
+  <!-- </>  code -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="118,178 80,216 118,254"/>
+    <line x1="137" y1="262" x2="163" y2="170"/>
+    <polyline points="182,178 220,216 182,254"/>
+  </g>
+
+  <!-- arrow: the transmutation -->
+  <g fill="none" stroke="#8FA3BF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="240" y1="216" x2="280" y2="216"/>
+    <polyline points="266,202 281,216 266,230"/>
+  </g>
+
+  <!-- O-O  the DAG -->
+  <line x1="340" y1="216" x2="414" y2="216" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="330" cy="216" r="21" fill="#41C7B0" stroke="#FFFFFF" stroke-width="10"/>
+  <circle cx="426" cy="216" r="21" fill="#41C7B0" stroke="#FFFFFF" stroke-width="10"/>
+
+  <!-- name -->
+  <text x="259" y="398" text-anchor="middle"
+        font-family="Consolas, 'Cascadia Mono', 'DejaVu Sans Mono', monospace"
+        font-size="76" font-weight="bold" fill="#FFFFFF" letter-spacing="1">targetfy</text>
+  </g>
+</svg>
