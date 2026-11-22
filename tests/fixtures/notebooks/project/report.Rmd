@@ -1,0 +1,22 @@
+---
+title: "Rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load}
+sales <- read.csv("data/sales.csv")
+```
+
+```{r skip, eval=FALSE}
+stop("skipped")
+```
+
+Revenue is `r sum(sales$units * sales$price)`.
+
+```{r summary}
+total <- sum(sales$units * sales$price)
+```

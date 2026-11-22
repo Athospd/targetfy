@@ -1,0 +1,6 @@
+{
+  "targets": {"fits": "fits", "trends": "trends", "forecast": "forecast"},
+  "handoff_files": [],
+  "redirected_files": {},
+  "stochastic": []
+}

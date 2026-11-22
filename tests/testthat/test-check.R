@@ -175,3 +175,175 @@ test_that("parsnip engines count as required packages", {
   expect_equal(check_env$required_packages(f),
                c("bonsai", "glmnet", "lightgbm", "rpart"))
 })
+
+# --- v2: circular references -------------------------------------------------
+
+run_pipeline <- function(name, scripts, pipeline, ...) {
+  project <- file.path(fixtures, name, "project")
+  map <- jsonlite::read_json(file.path(project, check_env$map_for(pipeline)),
+                             simplifyVector = FALSE)
+  check_env$targetfy_check(project, scripts, map, pipeline = pipeline, ...)
+}
+
+finding <- function(scan, kind) Filter(function(f) f$kind == kind, scan$findings)
+
+test_that("the flow scan finds versions, in-place files and carried loops", {
+  scan <- check_env$flow_scan(file.path(fixtures, "circular", "project"), "clean.R")
+  re <- finding(scan, "reassigned")
+  expect_length(re, 1)
+  expect_equal(re[[1]]$name, "sales")
+  expect_equal(re[[1]]$used_at, "clean.R:3")
+  expect_equal(re[[1]]$changed_at, "clean.R:4")
+  expect_true(re[[1]]$cycle)
+  inplace <- finding(scan, "in_place_file")
+  expect_equal(inplace[[1]]$path, "data/sales.csv")
+  carried <- finding(scan, "carried_loop")
+  expect_setequal(vapply(carried, function(f) f$loop, ""), c("for", "while"))
+  expect_length(finding(scan, "branch_candidate"), 0)
+})
+
+test_that("independent loops, applies and global state are told apart", {
+  dir <- tempfile(); dir.create(dir)
+  writeLines(c(
+    "files <- c('a.csv', 'b.csv')",
+    "fits <- list()",
+    "for (f in files) fits[[f]] <- nchar(f)",
+    "out <- c()",
+    "for (i in 1:3) out <- c(out, i * 2)",
+    "sq <- lapply(1:3, function(i) i^2)",
+    "acc <- Reduce(`+`, 1:5, accumulate = TRUE)",
+    "options(digits = 3)",
+    "set.seed(1)",
+    "counter <- 0",
+    "bump <- function() counter <<- counter + 1",
+    "y <- later + 1",
+    "later <- 2",
+    "x <- 1; y2 <- x; x <- 5",
+    "saveRDS(y2, 'tmp/y2.rds')",
+    "y3 <- readRDS('tmp/y2.rds')"), file.path(dir, "s.R"))
+  scan <- check_env$flow_scan(dir, "s.R")
+  branch <- finding(scan, "branch_candidate")
+  expect_equal(vapply(branch, function(f) f$where, ""), c("s.R:3", "s.R:5", "s.R:6"))
+  expect_equal(as.character(unlist(branch[[1]]$collects)), "fits")
+  expect_equal(finding(scan, "carried_loop")[[1]]$where, "s.R:7")
+  flags <- vapply(finding(scan, "global_state"), function(f) f$flag, "")
+  expect_true(all(c("options", "set.seed", "global_assign") %in% flags))
+  expect_equal(finding(scan, "defined_later")[[1]]$name, "later")
+  re <- finding(scan, "reassigned")
+  expect_equal(re[[1]]$name, "x")
+  expect_false(re[[1]]$cycle)
+  expect_equal(finding(scan, "handoff")[[1]]$path, "tmp/y2.rds")
+})
+
+test_that("a versioned Conversion with a redirected file is equivalent", {
+  res <- run_pipeline("circular", "clean.R", "_targets.R")
+  expect_equal(res$status, "equivalent")
+  expect_equal(target_result(res, "sales")$result, "match")
+  expect_equal(target_result(res, "x")$result, "match")
+  expect_equal(target_result(res, "total")$result, "match")
+  expect_equal(res$files[[1]]$file, "data/sales.csv")
+  expect_equal(res$files[[1]]$redirected_to, "data/sales_targetfy.csv")
+  expect_equal(res$files[[1]]$result, "match")
+  expect_length(res$outdated_after_build, 0)
+})
+
+test_that("a Pipeline that overwrites its own input is caught", {
+  res <- run_pipeline("circular", "clean.R", "targets_inplace.R")
+  expect_equal(res$status, "not_equivalent")
+  expect_true("sales_raw_file" %in% unlist(res$outdated_after_build))
+  expect_match(res$errors[[1]], "out of date right after it was built")
+})
+
+test_that("a Pipeline whose graph has a cycle fails with a hint", {
+  res <- run_pipeline("circular", "clean.R", "targets_cycle.R")
+  expect_equal(res$status, "not_equivalent")
+  expect_match(res$errors[[1]], "has a cycle")
+})
+
+# --- v2: notebooks -------------------------------------------------------------
+
+nb_dir <- file.path(fixtures, "notebooks", "project")
+
+test_that("a .qmd keeps R chunks, drops eval: false, display and other languages", {
+  t <- check_env$tangle(file.path(nb_dir, "analysis", "report.qmd"))
+  expect_true(t$notebook)
+  expect_equal(t$code[[1]], "params <- list(min_units = 10L)")
+  expect_false(any(grepl("never runs|not R|display_only", t$code)))
+  expect_true(any(grepl("lm(price ~ units", t$code, fixed = TRUE)))
+  expect_equal(check_env$origin_label("analysis/report.qmd", t,
+                                      which(grepl("^model <-", t$code))),
+               "analysis/report.qmd:31")
+  reasons <- vapply(t$skipped, function(s) s$reason, "")
+  expect_true(any(grepl("eval = FALSE", reasons)))
+  expect_true(any(grepl("python", reasons)))
+  expect_equal(t$inline[[1]]$code, "nrow(big)")
+})
+
+test_that(".Rmd, .md and .ipynb code is extracted with its origin", {
+  rmd <- check_env$tangle(file.path(nb_dir, "report.Rmd"))
+  expect_false(any(grepl("skipped", rmd$code)))
+  expect_equal(rmd$inline[[1]]$code, "sum(sales$units * sales$price)")
+  md <- check_env$tangle(file.path(nb_dir, "notes.md"))
+  expect_equal(md$code, c('sales <- read.csv("data/sales.csv")',
+                          "avg <- mean(sales$price)"))
+  nb <- check_env$tangle(file.path(nb_dir, "nb.ipynb"))
+  expect_equal(check_env$origin_label("nb.ipynb", nb, 3), "nb.ipynb:cell 3, line 1")
+  expect_error(check_env$tangle(file.path(nb_dir, "py.ipynb")), "python kernel")
+})
+
+test_that("a .qmd runs from its own folder and its Conversion is equivalent", {
+  res <- run_pipeline("notebooks", "analysis/report.qmd", "_targets.R")
+  expect_equal(res$status, "equivalent")
+  expect_equal(target_result(res, "params")$result, "match")
+  expect_equal(target_result(res, "coefs")$result, "match")
+})
+
+test_that("an R-kernel .ipynb Conversion is equivalent", {
+  res <- run_pipeline("notebooks", "nb.ipynb", "targets_nb.R")
+  expect_equal(res$status, "equivalent")
+  expect_equal(target_result(res, "stop_here")$result, "match")
+})
+
+test_that("a notebook failure is reported at its notebook line", {
+  dir <- tempfile(); dir.create(dir)
+  writeLines(c("# t", "", "```{r}", "x <- 1", "stop('boom')", "```"),
+             file.path(dir, "f.qmd"))
+  writeLines(c("library(targets)", "list(tar_target(x, 1))"),
+             file.path(dir, "_targets.R"))
+  res <- check_env$targetfy_check(dir, "f.qmd", list(targets = list(x = "x")))
+  expect_equal(res$script_failure$line, 5)
+  expect_equal(res$script_failure$where, "f.qmd:5")
+})
+
+test_that("packages are read from notebook chunks", {
+  f <- tempfile(fileext = ".Rmd")
+  writeLines(c("```{r}", "library(dplyr)", "```", "```r", "library(nope)", "```"), f)
+  expect_equal(check_env$required_packages(f), "dplyr")
+})
+
+# --- v2: dynamic branching -----------------------------------------------------
+
+test_that("the region loop is a branch candidate, and its branched Pipeline is equivalent", {
+  project <- file.path(fixtures, "branching", "project")
+  scan <- check_env$flow_scan(project, "regional_trends.R")
+  loop <- Filter(function(f) f$kind == "branch_candidate" && grepl(":7$", f$where),
+                 scan$findings)
+  expect_length(loop, 1)
+  expect_equal(as.character(unlist(loop[[1]]$collects)), "fits")
+  expect_length(finding(scan, "carried_loop"), 0)
+  res <- run_fixture("branching", "regional_trends.R")
+  expect_equal(res$status, "equivalent")
+  expect_equal(target_result(res, "region_fit")$result, "not_compared")
+  expect_equal(target_result(res, "fits")$result, "match")
+  expect_equal(target_result(res, "forecast")$result, "match")
+  expect_true(all(vapply(res$files, function(f) f$result == "match", TRUE)))
+})
+
+test_that("the render Enhancement builds the document from the Pipeline", {
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc is not available")
+  res <- run_pipeline("notebooks", "report.Rmd", "targets_report.R")
+  expect_equal(res$status, "equivalent")
+  expect_equal(target_result(res, "total")$result, "match")
+  expect_equal(target_result(res, "report_html")$result, "not_compared")
+  expect_length(res$outdated_after_build, 0)
+})

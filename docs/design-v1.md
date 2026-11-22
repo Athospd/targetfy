@@ -124,6 +124,8 @@ v1 catalog:
 
 ## Out of scope for v1 (planned)
 
+Notebooks, the report Enhancement and scripts that aren't DAGs shipped in v2: see [design-v2.md](design-v2.md).
+
 - **A granularity setting for Targets.** v1 uses one fixed rule: one Target per Step. A later option could let the user choose coarser Targets (fewer Targets, each bundling several Steps) or finer ones (closer to one per statement, more caching but risking huge numbers of tiny Targets). The open question is how the Step Map and the Equivalence Check cope when one Target covers several Steps, or one Step is split across several Targets.
 
 - Stricter comparison levels, for example with `{waldo}`.

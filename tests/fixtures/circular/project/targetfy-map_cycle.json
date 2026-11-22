@@ -1,0 +1,5 @@
+{
+  "targets": {"model": "model", "sales": "sales", "x": "x", "total": "total"},
+  "handoff_files": [],
+  "stochastic": []
+}

@@ -1,0 +1,33 @@
+---
+title: "Sales report"
+params:
+  min_units: 10
+---
+
+Some prose that is dropped.
+
+```{r}
+#| label: load
+sales <- read.csv("../data/sales.csv")
+big <- sales[sales$units >= params$min_units, ]
+```
+
+We have `{r} nrow(big)` big sales.
+
+```{r}
+#| eval: false
+stop("never runs")
+```
+
+```{python}
+print("not R")
+```
+
+```r
+display_only <- TRUE
+```
+
+```{r model}
+model <- lm(price ~ units, data = big)
+coefs <- coef(model)
+```

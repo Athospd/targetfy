@@ -1,0 +1,18 @@
+---
+title: "Rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load}
+sales <- targets::tar_read(sales, store = "_targets_report")
+```
+
+Revenue is `r sum(sales$units * sales$price)`.
+
+```{r summary}
+total <- targets::tar_read(total, store = "_targets_report")
+```

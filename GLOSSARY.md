@@ -7,8 +7,12 @@ targetfy turns an ordinary R script into an equivalent `{targets}` pipeline, so 
 ### Input
 
 **Source Script**:
-The arbitrary `.R` file a user hands to targetfy to be converted.
+The arbitrary `.R` file or Notebook a user hands to targetfy to be converted.
 _Avoid_: input file, legacy code, original script
+
+**Notebook**:
+A `.qmd`, `.Rmd`, `.md` or R-kernel `.ipynb` Source Script. Its R code chunks or cells, in order, are the code that gets converted; the prose is dropped. Its code runs from the notebook's own folder, as rendering does.
+_Avoid_: report, document (for the source)
 
 **Script Sequence**:
 The ordered list of Source Scripts the user explicitly names as one analysis; targetfy never guesses which files belong to it. A single file is a Sequence of one.
@@ -25,6 +29,10 @@ _Avoid_: orphan script, stray file
 **Working Folder**:
 The folder targetfy creates next to a Loose Script, named after it, holding copies of the Source Scripts and the files they read; it becomes the project, and the original files are never touched.
 _Avoid_: sandbox, workspace
+
+**In-place File**:
+A file the Script Sequence reads and later overwrites. A Pipeline that did the same would never be up to date, so the Pipeline writes the new version to another path, a **Redirected File**, recorded in the Step Map.
+_Avoid_: mutable input
 
 **Unresolved Object**:
 A name the Script Sequence uses but never defines, loads or imports.
@@ -43,6 +51,18 @@ _Avoid_: parity, same behaviour
 **Step**:
 A meaningful object the Source Script builds (a dataset, model, summary or file), possibly over several statements; each Step becomes one Target.
 _Avoid_: line, assignment, chunk
+
+**Version**:
+One of the successive values a variable holds when it's changed after another Step used it. Each Version becomes its own Target; only the last one maps to the variable in the Step Map. Keeping them as one Target would create a cycle.
+_Avoid_: revision, copy
+
+**Carried Loop**:
+A loop or fold whose iterations depend on the previous one (a running total, a convergence loop, `Reduce()`). It always stays inside one Target. A loop whose iterations are independent is a candidate for Branching instead.
+_Avoid_: stateful loop
+
+**Flow Scan**:
+The reading of the Script Sequence's code, without running it, that `scripts/read.R` does before a Conversion: what each statement reads and writes, plus every Version, In-place File, Handoff File, Carried Loop and branching candidate.
+_Avoid_: lint, static analysis
 
 **Equivalence Check**:
 The verification that runs the Source Script and the Pipeline in a throwaway copy of the project and compares their results.

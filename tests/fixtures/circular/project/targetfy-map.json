@@ -1,0 +1,6 @@
+{
+  "targets": {"model": "model", "sales": "sales", "x": "x", "total": "total"},
+  "handoff_files": [],
+  "redirected_files": {"data/sales.csv": "data/sales_targetfy.csv"},
+  "stochastic": []
+}
