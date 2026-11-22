@@ -26,7 +26,16 @@ main <- function(args = commandArgs(trailingOnly = TRUE)) {
     }
   }
   setwd(opts$project)
-  widget <- targets::tar_glimpse(script = opts$pipeline)
+  widget <- tryCatch(targets::tar_glimpse(script = opts$pipeline),
+                     error = function(e) e)
+  if (inherits(widget, "error")) {
+    # Usually a package the Pipeline script attaches isn't installed.
+    msg <- conditionMessage(widget)
+    pkg <- regmatches(msg, regexpr("there is no package called [^\n]*", msg))
+    message("glimpse could not read the Pipeline: ",
+            if (length(pkg)) pkg else trimws(strsplit(msg, "\n")[[1]][1]))
+    quit(status = 2, save = "no")
+  }
   name <- tools::file_path_sans_ext(basename(opts$pipeline))
   # The system temp folder: R deletes its own session tempdir() on exit,
   # before the browser has loaded the page.

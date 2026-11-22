@@ -145,3 +145,23 @@ test_that("the command line finds targetfy-map_<name>.json for targets_<name>.R"
   expect_equal(res$status, "equivalent")
   expect_true(any(vapply(res$targets, function(t) t$result == "match", TRUE)))
 })
+
+test_that("a missing package is reported as not checked, never as a bug", {
+  res <- run_fixture("missing_package", "script.R")
+  expect_equal(res$status, "not_checked")
+  expect_equal(res$equivalence, "unverified")
+  expect_equal(as.character(res$missing_packages), "notapkgxyz")
+  expect_equal(check_env$EXIT_CODES[["not_checked"]], 0)
+  res <- run_fixture("missing_package", "script.R", mode = "static")
+  expect_equal(res$status, "not_checked")
+})
+
+test_that("required packages are read from library, :: and tar_option_set", {
+  f <- tempfile(fileext = ".R")
+  writeLines(c("library(dplyr)", "require('tidyr')",
+               "x <- purrr::map(1, identity)",
+               "library(p, character.only = TRUE)",
+               "targets::tar_option_set(packages = c('readr', 'fs'))"), f)
+  expect_equal(check_env$required_packages(f),
+               c("dplyr", "fs", "purrr", "readr", "targets", "tidyr"))
+})

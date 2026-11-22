@@ -11,7 +11,9 @@
 # Never touches DIR: every run happens in throwaway copies.
 #
 # Exit codes: 0 equivalent / static_pass (also when the scripts themselves
-#             fail: see script_failure), 1 not_equivalent / static_fail,
+#             fail: see script_failure) / not_checked (a package the code
+#             needs isn't installed: see missing_packages),
+#             1 not_equivalent / static_fail,
 #             2 error, 3 needs_confirmation (copy too large).
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
@@ -160,6 +162,64 @@ static_check <- function(wd, pipeline = "_targets.R") {
   out
 }
 
+# Packages the code needs: library()/require()/requireNamespace() calls,
+# pkg::fn, and tar_option_set(packages = ...). Read from the code, not run.
+required_packages <- function(paths) {
+  pkgs <- character()
+  walk <- function(e) {
+    if (!is.call(e)) return()
+    fn <- e[[1]]
+    fname <- if (is.symbol(fn)) as.character(fn) else ""
+    if (is.call(fn) && identical(fn[[1]], quote(`::`)) ||
+        is.call(fn) && identical(fn[[1]], quote(`:::`))) {
+      pkgs <<- c(pkgs, as.character(fn[[2]]))   # pkg::fn(...)
+      fname <- as.character(fn[[3]])
+    }
+    if (fname %in% c("::", ":::")) pkgs <<- c(pkgs, as.character(e[[2]]))
+    if (fname %in% c("library", "require", "requireNamespace",
+                     "loadNamespace") && length(e) > 1) {
+      char_only <- isTRUE(tryCatch(eval(e$character.only, baseenv()),
+                                   error = function(err) FALSE))
+      arg <- e[[2]]
+      if (is.character(arg) || (is.symbol(arg) && !char_only))
+        pkgs <<- c(pkgs, as.character(arg))
+    }
+    if (fname == "tar_option_set" && !is.null(e$packages)) {
+      val <- tryCatch(eval(e$packages, baseenv()), error = function(err) NULL)
+      if (is.character(val)) pkgs <<- c(pkgs, val)
+    }
+    # Index into the call: binding an empty argument (x[, 1]) to a
+    # variable makes R treat it as missing.
+    for (i in seq_along(e)[-1]) {
+      if (!identical(e[[i]], quote(expr = ))) walk(e[[i]])
+    }
+  }
+  for (p in paths[file.exists(paths)]) {
+    exprs <- tryCatch(parse(p), error = function(e) NULL)
+    for (e in exprs) walk(e)
+  }
+  sort(unique(pkgs[nzchar(pkgs)]))
+}
+
+missing_packages <- function(pkgs) {
+  pkgs[!vapply(pkgs, function(p) nzchar(system.file(package = p)), TRUE)]
+}
+
+# The Generated Files and Source Scripts whose packages the check needs.
+code_files <- function(dir, scripts, pipeline) {
+  fun_files <- list.files(file.path(dir, c("R", "R_targets")),
+                          pattern = "\\.[Rr]$", full.names = TRUE)
+  c(file.path(dir, c(scripts, pipeline)), fun_files)
+}
+
+# TRUE when the Static Check failed only because a package isn't installed.
+blocked_by_packages <- function(s) {
+  length(s$parse_errors) == 0 &&
+    any(grepl("there is no package called",
+              c(s$validate, if (is.character(s$manifest)) s$manifest),
+              fixed = TRUE))
+}
+
 static_ok <- function(s) {
   length(s$parse_errors) == 0 && identical(s$validate, "ok") &&
     is.data.frame(s$manifest)
@@ -298,7 +358,19 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
   else result$workdir <- root
   pipe_dir <- copy_project(project, file.path(root, "pipeline"), files)
 
+  result$missing_packages <- I(missing_packages(
+    required_packages(code_files(project, scripts, pipeline))))
   result$static <- static_check(pipe_dir, pipeline)
+  if (!static_ok(result$static) && blocked_by_packages(result$static)) {
+    # Not a fault in the Conversion: the environment lacks a package, so
+    # nothing could be checked. Never ask for fixes to the Generated Files.
+    result$status <- "not_checked"
+    result$equivalence <- "unverified"
+    result$errors <- list(paste(
+      "Not checked: these packages are not installed:",
+      paste(result$missing_packages, collapse = ", ")))
+    return(result)
+  }
   if (mode == "static") {
     result$status <- if (static_ok(result$static)) "static_pass" else "static_fail"
     result$equivalence <- "unverified"
@@ -425,7 +497,8 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
   result
 }
 
-EXIT_CODES <- c(equivalent = 0, static_pass = 0, not_equivalent = 1,
+EXIT_CODES <- c(equivalent = 0, static_pass = 0, not_checked = 0,
+                not_equivalent = 1,
                 static_fail = 1, error = 2, needs_confirmation = 3)
 
 parse_args <- function(args) {

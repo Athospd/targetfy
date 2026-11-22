@@ -75,6 +75,7 @@ Rscript <skill folder>/scripts/check.R --project <project> --scripts a.R,b.R \
 Read `result.json` and act on its `status`:
 - **`equivalent`** or **`static_pass`**: go to step 5. If `result.json` has a `script_failure`, the Source Scripts failed to run on their own, at the `script` and `line` it names, so the check fell back to the Static Check. Equivalence is unverified, and the Targets with `after_failure: true` come from code that never ran. Before step 5, apply `references/unresolved-objects.md` if the message is an object or function not found.
 - **`not_equivalent`** or **`static_fail`**: read each failing Target's `detail` and each failing file, fix the Generated Files, and run the check again. Stop after **3 runs** in total and go to step 5 with what you have.
+- **`not_checked`**: a package the code needs isn't installed (`missing_packages`), so the Static Check couldn't run. This is not a fault in the Conversion: don't change the Generated Files for it. Name the packages for the user and go to step 5.
 - **`error`**: the Pipeline failed to build, or a Source Script wasn't found. Treat a build failure like `not_equivalent`.
 - **`needs_confirmation`**: tell the user the copy size. Re-run with `--allow-large` or `--mode static`, as they choose.
 
@@ -88,10 +89,10 @@ Then show the Pipeline's graph, whatever the check's status:
 Rscript <skill folder>/scripts/glimpse.R --project <project> --pipeline <Pipeline script>
 ```
 
-It saves `targets::tar_glimpse()` as an HTML page in the system temp folder, opens it in the browser and prints its path. Give the user that path. If it reports a missing package (`visNetwork`), mention it in one line and carry on.
+It saves `targets::tar_glimpse()` as an HTML page in the system temp folder, opens it in the browser and prints its path. Give the user that path. If it can't draw the graph (for example `visNetwork`, or a package the Pipeline attaches, isn't installed), mention it in one line and carry on.
 
 Done when every dropped or changed line, every Unresolved Object decision and every Target's check result appears in the report, and the graph has been shown.
 
 ## 6. Enhancement wizard
 
-Only after `equivalent` or `static_pass`, and never when unchecked: offer Enhancements, one at a time, following `references/enhancements.md`. The user can decline them all, in which case the work is complete. If any Enhancement was kept, run `glimpse.R` once more at the end so the user sees the final graph.
+Only after `equivalent` or `static_pass`, and never when unchecked or `not_checked`: offer Enhancements, one at a time, following `references/enhancements.md`. The user can decline them all, in which case the work is complete. If any Enhancement was kept, run `glimpse.R` once more at the end so the user sees the final graph.

@@ -10,7 +10,7 @@ Write it for the user. Every section is required; write "None" for an empty one.
 **Checked:** 2026-11-21, 3 check runs
 
 ## Why it wasn't verified
-Only when the status isn't "equivalent" or "not equivalent". For example: `analysis.R` failed to run at line 12: `could not find function "lgb.train"`. The comparison couldn't run, so the Pipeline was generated anyway and passed the Static Check. Or: R / the `targets` package isn't installed, so no check ran. Say what to install or fix to get it verified.
+Only when the status isn't "equivalent" or "not equivalent". For example: `analysis.R` failed to run at line 12: `could not find function "lgb.train"`. The comparison couldn't run, so the Pipeline was generated anyway and passed the Static Check. Or: R / the `targets` package isn't installed, so no check ran. Or: `notapkg` isn't installed, so the check returned `not_checked`; list every entry of `missing_packages`. Say what to install or fix to get it verified.
 
 ## Targets
 | Target | Step (script variable) | Check | Notes |
