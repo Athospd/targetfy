@@ -1,5 +1,5 @@
 """Builds the targetfy hex sticker: logo.svg (text as outlines), then
-logo.png (518x600) and logo@2x.png via R's rsvg.
+logo.png (1036x1200, twice the standard 518x600 sticker) via R's rsvg.
 
     python man/figures/make-logo.py
 
@@ -121,8 +121,7 @@ def build():
 
 
 def render():
-    r = ("rsvg::rsvg_png('logo.svg', 'logo.png', width = 518, height = 600); "
-         "rsvg::rsvg_png('logo.svg', 'logo@2x.png', width = 1036, height = 1200)")
+    r = "rsvg::rsvg_png('logo.svg', 'logo.png', width = 1036, height = 1200)"
     subprocess.run(["Rscript", "-e", r], cwd=HERE, check=True)
 
 
