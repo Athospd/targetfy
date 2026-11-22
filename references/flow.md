@@ -64,6 +64,11 @@ A `for` loop that only fills a collection at the loop variable's position (`fits
 
 Options, environment variables, seeds, memory and error handling are `pipeline_setup` findings: see `references/setup.md`.
 
+## `hidden_input`: inputs targets can't see
+
+- `dynamic_path`: a reader whose path is computed (`read.csv(rates_file)`). Work out which file it is and track it with `tar_file_read()`. The Invalidation Check tests every data file in the project anyway, so a miss shows up as a hidden dependency.
+- `session`: `Sys.getenv()`, `Sys.Date()`, `Sys.time()`, `getOption()`, `file.mtime()`, `file.info()`. targets doesn't track these values. Make each its own Target and pass it to the Steps that use it. If it should be read on every run (today's date, an environment variable), give that Target `cue = tar_cue("always")`. Then only its dependents rerun, and only when the value changes.
+
 ## `defined_later`: used before it's defined
 
 A name read at one point but first assigned later, usually in a later script. Flag it as an ordering problem (`references/unresolved-objects.md`). Never reorder the Script Sequence yourself.

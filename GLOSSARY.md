@@ -72,6 +72,14 @@ _Avoid_: header, preamble
 The verification that runs the Source Script and the Pipeline in a throwaway copy of the project and compares their results.
 _Avoid_: test, diff
 
+**Invalidation Check**:
+The second half of the Equivalence Check: each input file is changed slightly in a fresh copy, and the Targets the Pipeline reruns must be exactly those whose Steps change when the scripts run on the changed file.
+_Avoid_: sensitivity test, mutation test
+
+**Hidden Dependency**:
+An input a Step depends on that the Pipeline doesn't track (a file a function opens itself, the clock, an environment variable), so the Pipeline would go stale when it changes.
+_Avoid_: untracked input, implicit dependency
+
 **Static Check**:
 The lighter verification used when the Source Script can't be run: the Generated Files are valid, but Equivalence stays unverified.
 _Avoid_: dry run, lint

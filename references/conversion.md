@@ -28,6 +28,7 @@ coefs <- summary(model)$coefficients  # Step `model_summary`
 - **Packages:** every package the scripts attach with `library()` or `require()` goes into `tar_option_set(packages = c(...))`. Calls like `pkg::fn()` stay as they are.
 - **The Pipeline script's setup** (functions defined in the scripts, sourced helpers, `options()`, `set.seed()`, `rm()`/`gc()`, `try()`, in-house packages): follow `references/setup.md`.
 - **Input files:** use `tar_file_read(name, "path", read = reader(!!.x))`, which creates `name_file` and `name`. For a set of files found with `list.files()`, use `tarchetypes::tar_files_input(name, list.files(...))`, which tracks each file.
+- **Every file a Step reads reaches it through a file Target**, never as a path the function opens on its own. Otherwise the Pipeline can't see the file change, and the Invalidation Check reports a hidden dependency.
 - **Output files:** use `tar_file(name, write_fn(value, "path"))`, where `write_fn` writes the file, creates its folder if needed, and returns the path.
 - **Sourced helpers:** a file that only defines functions is loaded where it is, with `tar_source(c("<functions folder>", "helpers.R"))`. A helper with top-level work (reading data, setting options) is converted like any Source Script. `read.json` says which is which (`sourced_file`, `sourced_folder`).
 - **Handoff Files** (`saveRDS()` in one script, `readRDS()` in a later one) become a direct dependency between Targets. Don't write the file.

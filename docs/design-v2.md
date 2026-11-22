@@ -78,6 +78,26 @@ Check changes this needed:
 
 Not verified: `tar_hook_before()` on real crew workers, since `crew` isn't installed on the test machine. The hook itself was tested on a sequential Pipeline.
 
+## The Invalidation Check
+
+One comparison run can't tell a tracked input from an untracked one: both sides read the same bytes. A Pipeline whose function reads `data/rates.csv` itself passes, then goes stale the first time the file changes. This was suggested in a reply to the launch post.
+
+- **Procedure**, after the plain comparison passes. For each input file:
+  1. change it in fresh copies;
+  2. rerun the Script Sequence and note which Steps change;
+  3. in a copy of the built Pipeline, ask `tar_outdated()`, then rebuild.
+- **Verdicts** per mapped Target:
+  - `hidden_dependency`: the Step changed but the Target wasn't outdated. Fails the check.
+  - `mismatch_after_change`: the Target reran but no longer matches. Fails the check.
+  - `extra_rerun`: the Target reran but its Step didn't change. Informational.
+  - `reran` and `unaffected`: as expected.
+  - Stochastic Targets are skipped.
+- **Inputs, most likely first:** files the code reads by name, files the Pipeline tracks, then every other data file in the project. The last group catches reads the scan can't see, such as computed paths, helpers and package code. At most `--max-inputs` (10) are tested, and the rest are listed.
+- **The change:** a small, valid edit that keeps the format. CSV, TSV, TXT and DAT files get their last data line repeated; for `.rds`, a data frame gets its last row repeated and a vector its last element. Anything else is `not_tested`, and the report says so.
+- **Cost:** one more script run and one Pipeline rebuild per input. `--skip-invalidation` turns it off.
+- **Scan side:** new `hidden_input` findings for readers with computed paths and for session reads (`Sys.getenv()`, `Sys.Date()`, `Sys.time()`, `getOption()`, file times), to be made explicit Targets (`cue = tar_cue("always")` where they must be read every run). `outdated_after_build` now exempts the Targets downstream of always-run and tolerated Targets.
+- **Not covered:** inputs that aren't files (databases, APIs). An input whose small change the scripts happen to ignore (deduplication, for example) shows as `unused` or `extra_rerun`, never as a false failure.
+
 ## Still out of scope
 
 - A granularity setting for Targets.

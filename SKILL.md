@@ -92,7 +92,7 @@ Following `references/conversion.md`, write:
 ## 4. Check
 
 Ask the user which check to run, unless they've already said. The matching test runs their code, so it's their call. Explain what each one does in plain words:
-- **Run and compare** (the Equivalence Check): runs the scripts and the Pipeline in a throwaway copy of the project folder, compares their results, then deletes the copy. Nothing in the user's own folder is run or changed. Mark it recommended, unless the scripts reach external systems (databases, APIs, credentials, sending email) or the user has said they're slow: then recommend the other option and say why.
+- **Run and compare** (the Equivalence Check): runs the scripts and the Pipeline in a throwaway copy of the project folder, compares their results, then deletes the copy. Nothing in the user's own folder is run or changed. If they match, it then changes each input data file in turn (up to 10, in fresh copies) and checks that the Targets the Pipeline reruns are the ones whose values change in the scripts. That catches inputs the Pipeline doesn't track. This runs the scripts once more per input: for slow scripts, offer `--skip-invalidation` or a lower `--max-inputs`. Mark it recommended, unless the scripts reach external systems (databases, APIs, credentials, sending email) or the user has said they're slow: then recommend the other option and say why.
 - **Only validate the files** (the Static Check): checks that the Generated Files parse and form a valid Pipeline, and runs none of the user's code. The report says Equivalence is unverified.
 
 Mention what you already know will limit the run, such as a package the scripts attach that isn't installed. Never mention the size of files the scripts don't use.
@@ -108,6 +108,8 @@ Read `result.json` and act on its `status`:
 - **`not_equivalent`** or **`static_fail`**: read each failing Target's `detail`, each failing file and `errors`, fix the Generated Files, and run the check again. Stop after **3 runs** in total and go to step 5 with what you have.
   - An error saying the graph has a cycle means a Target depends on itself: split the versions of a reassigned variable (`references/flow.md`).
   - A non-empty `outdated_after_build` means the Pipeline is out of date right after being built: it changes its own inputs, usually by overwriting a file it reads.
+  - A "Hidden dependency" error comes from the Invalidation Check (`invalidation.inputs`): changing that file changes those Steps in the scripts, but the Pipeline doesn't rerun their Targets. A function reads the file itself. Track it with `tar_file_read()`, or with a `format = "file"` Target passed to that function. `mismatch_after_change` means the Targets reran but no longer match the scripts.
+- Inputs the Invalidation Check couldn't change (`not_tested`: `.xlsx`, binary files, nested `.rds`) or didn't reach (`invalidation.not_tested`, past `--max-inputs`) stay unverified for tracking. Say so in the report.
 - **`not_checked`**: a package the code needs isn't installed (`missing_packages`), so the Static Check couldn't run. This is not a fault in the Conversion: don't change the Generated Files for it. Name the packages for the user and go to step 5.
 - **`error`**: the Pipeline failed to build, or a Source Script wasn't found. Treat a build failure like `not_equivalent`.
 - **`needs_confirmation`**: tell the user the copy size. Re-run with `--allow-large` or `--mode static`, as they choose.

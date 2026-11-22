@@ -21,6 +21,15 @@ Only when the status isn't "equivalent" or "not equivalent". For example: `analy
 | sales_file | — | not compared | input file tracking |
 | model_fit | `fit` | unverified | after the failure point: this code never ran |
 
+## Changing one input
+From `result.json`'s `invalidation`: each input file was changed in a fresh copy, then the scripts and the Pipeline were rerun.
+| Input | Found as | Result | Notes |
+|---|---|---|---|
+| data/sales.csv | read by the code | pass | `sales`, `total` changed and reran |
+| data/rates.csv | data file in the project | hidden dependency | fixed in run 2: now tracked by `rates` |
+| data/notes.txt | data file in the project | unused | nothing depends on it |
+| data/model.xlsx | read by the code | not tested | can't change this file safely |
+
 ## Files written by the scripts
 | File | Check | Notes |
 |---|---|---|

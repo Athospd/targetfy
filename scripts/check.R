@@ -7,6 +7,7 @@
 #                                       DIR/targetfy-map[_<name>].json)
 #                   [--mode equivalence|static] [--max-copy-mb 1024]
 #                   [--allow-large] [--keep] [--out result.json]
+#                   [--skip-invalidation] [--max-inputs 10]
 #
 # Never touches DIR: every run happens in throwaway copies.
 #
@@ -301,7 +302,12 @@ APPLY_FUNS <- c("lapply", "sapply", "vapply", "Map", "mapply", "map",
   "imap", "pmap", "map2", "walk", "future_map", "future_lapply", "parLapply",
   "mclapply", "group_map", "by", "tapply")
 CARRY_FUNS <- c("Reduce", "accumulate", "reduce")
-SETUP_FIELDS <- c("sourced", "list_dirs", "libraries", "global_code", "dev_paths")
+SETUP_FIELDS <- c("sourced", "list_dirs", "libraries", "global_code", "dev_paths",
+                  "dynamic_reads", "session_reads")
+# Reads of session state targets can't see: a Target using them doesn't
+# rerun when they change.
+SESSION_READS <- c("Sys.getenv", "Sys.Date", "Sys.time", "date", "getOption",
+                   "Sys.info", "Sys.timezone", "nsl", "file.mtime", "file.info")
 APPEND_FUNS <- c("c", "rbind", "cbind", "append", "bind_rows", "bind_cols",
                  "list", "rbindlist")
 
@@ -352,6 +358,7 @@ new_flow <- function() {
   st$sourced <- character(); st$list_dirs <- character()
   st$libraries <- character(); st$global_code <- character()
   st$seed <- NULL; st$dev_paths <- character()
+  st$dynamic_reads <- character(); st$session_reads <- character()
   st
 }
 
@@ -401,6 +408,7 @@ flow_walk <- function(e, st) {
     st$files_read <- c(st$files_read, inner$files_read)
     st$files_written <- c(st$files_written, inner$files_written)
     st$flags <- c(st$flags, setdiff(inner$flags, "function_def"))
+    for (f in SETUP_FIELDS) st[[f]] <- c(st[[f]], inner[[f]])
     return(invisible(st))
   }
   if (fname %in% c("~", "quote", "bquote", "expression")) return(invisible(st))
@@ -476,7 +484,11 @@ flow_walk <- function(e, st) {
   if (fname %in% READ_FUNS) {
     p <- file_arg(e, 1)
     if (!is.null(p)) st$files_read <- c(st$files_read, p)
+    else if (length(args)) st$dynamic_reads <- c(st$dynamic_reads,
+                                                 paste(deparse(e), collapse = " "))
   }
+  if (fname %in% SESSION_READS)
+    st$session_reads <- c(st$session_reads, paste(deparse(e), collapse = " "))
   if (fname %in% names(WRITE_FUNS)) {
     p <- file_arg(e, WRITE_FUNS[[fname]])
     if (!is.null(p)) st$files_written <- c(st$files_written, p)
@@ -658,6 +670,20 @@ setup_findings <- function(project, statements) {
             "project's `.Rprofile` (renv writes it there), not in a Pipeline. Drop it ",
             "and list it under \"Lines left out\"; if `.Rprofile` doesn't do it, tell the user."),
             where(i)))
+    for (code in unique(st$dynamic_reads))
+      add(kind = "hidden_input", input = "dynamic_path", where = where(i), code = code,
+          message = sprintf(paste0(
+            "%s: `%s` reads a file whose path is computed, so the scan can't tell which ",
+            "file it is. Review it: track the file with `tar_file_read()` or a ",
+            "`format = \"file\"` Target passed to the function. The Invalidation Check ",
+            "tests the project's data files either way."), where(i), code))
+    for (code in unique(st$session_reads))
+      add(kind = "hidden_input", input = "session", where = where(i), code = code,
+          message = sprintf(paste0(
+            "%s: `%s` reads session state (environment, clock, options, file times) that ",
+            "targets doesn't track: a Target using it won't rerun when it changes. Make it ",
+            "its own Target and pass it in; for values that should be read every run, ",
+            "`tar_target(name, %s, cue = tar_cue(\"always\"))`."), where(i), code, code))
     for (d in unique(st$dev_paths))
       add(kind = "pipeline_setup", setup = "dev_package", where = where(i), path = d,
           suggest = sprintf("pkgload::load_all(\"%s\") before tar_option_set(imports = \"<package>\")", d),
@@ -1060,8 +1086,26 @@ outdated_after_build <- function(wd, script, store) {
     errored <- tryCatch(targets::tar_meta(fields = error, store = store,
                                           complete_only = TRUE)$name,
                         error = function(e) character())
-    setdiff(out, c(always, intersect(null_err, errored)))
+    exempt <- c(always, intersect(null_err, errored))
+    # What depends on an always-run or tolerated Target is outdated too.
+    if (length(exempt) && length(out)) {
+      edges <- tryCatch(targets::tar_network(script = script, store = store,
+                                             targets_only = TRUE,
+                                             reporter = "silent")$edges,
+                        error = function(e) NULL)
+      if (!is.null(edges)) exempt <- downstream_of(exempt, edges)
+    }
+    setdiff(out, exempt)
   }, error = function(e) character()))
+}
+
+downstream_of <- function(names, edges) {
+  seen <- names
+  repeat {
+    nxt <- setdiff(edges$to[edges$from %in% seen], seen)
+    if (!length(nxt)) return(seen)
+    seen <- c(seen, nxt)
+  }
 }
 
 read_target <- function(wd, name, store = "_targets") {
@@ -1151,12 +1195,156 @@ structure_of <- function(x) {
 structure_match <- function(a, b) identical(structure_of(a), structure_of(b))
 
 # ---------------------------------------------------------------------------
+# Invalidation Check: change one input, compare what reruns
+# ---------------------------------------------------------------------------
+# One run from the same files can't tell a tracked input from an untracked
+# one: both sides read the same bytes. So, for each input file, change it
+# in fresh copies, rerun the Script Sequence, and ask the built Pipeline
+# what it thinks is outdated. A Step whose value changes while its Target
+# stays up to date is a hidden dependency: the Pipeline would go stale.
+
+PERTURB_EXT <- c("csv", "tsv", "txt", "dat", "rds")
+NOT_INPUT <- c("^R/", "^R_targets/", "^renv/", "^\\.", "(^|/)DESCRIPTION$",
+               "(^|/)NAMESPACE$", "\\.Rproj$", "^targetfy-")
+
+# A small, valid change: repeat the last data line (or row, or element).
+# FALSE when the file can't be changed safely.
+perturb_file <- function(path) {
+  ext <- tolower(tools::file_ext(path))
+  if (ext %in% c("csv", "tsv", "txt", "dat")) {
+    l <- readLines(path, warn = FALSE)
+    nz <- which(nzchar(trimws(l)))
+    if (length(nz) < (if (ext %in% c("csv", "tsv")) 2 else 1)) return(FALSE)
+    writeLines(c(l[seq_len(max(nz))], l[[max(nz)]]), path)
+    return(TRUE)
+  }
+  if (ext == "rds") {
+    x <- tryCatch(readRDS(path), error = function(e) NULL)
+    if (is.data.frame(x) && nrow(x)) x <- rbind(x, x[nrow(x), , drop = FALSE])
+    else if (is.atomic(x) && length(x) && is.null(dim(x))) x <- c(x, x[length(x)])
+    else return(FALSE)
+    saveRDS(x, path)
+    return(TRUE)
+  }
+  FALSE
+}
+
+# Files the Pipeline tracks (file Targets' paths), from a built store.
+tracked_files <- function(wd, store) {
+  m <- with_wd(wd, tryCatch(targets::tar_meta(fields = c(format, path), store = store),
+                            error = function(e) NULL))
+  if (is.null(m)) return(character())
+  p <- unlist(m$path[m$format %in% "file"])
+  unique(p[!is.na(p)])
+}
+
+# The inputs to test, most likely first: files the code reads by name, files
+# the Pipeline tracks, then every other data file in the project (a read
+# the scan couldn't see is found this way too). Files the scripts write,
+# and code, aren't inputs.
+invalidation_inputs <- function(project, scripts, files, script_written,
+                                tracked, max_inputs) {
+  scanned <- tryCatch({
+    sc <- flow_scan(project, scripts)
+    unique(unlist(lapply(sc$statements, function(s) unlist(s$files_read))))
+  }, error = function(e) character())
+  is_data <- function(f) tolower(tools::file_ext(f)) %in% PERTURB_EXT &&
+    !any(vapply(NOT_INPUT, grepl, TRUE, x = f))
+  rest <- files[vapply(files, is_data, TRUE) & !files %in% script_written]
+  cand <- unique(c(intersect(scanned, files), intersect(tracked, files), rest))
+  cand <- cand[!cand %in% script_written | cand %in% scanned]
+  list(test = utils::head(cand, max_inputs),
+       skipped = utils::tail(cand, max(0, length(cand) - max_inputs)),
+       origin = stats::setNames(ifelse(cand %in% scanned, "read by the code",
+                                ifelse(cand %in% tracked, "tracked by the Pipeline",
+                                       "data file in the project")), cand))
+}
+
+copy_dir <- function(from, to) {
+  dir.create(to, recursive = TRUE, showWarnings = FALSE)
+  file.copy(list.files(from, full.names = TRUE, all.files = TRUE, no.. = TRUE),
+            to, recursive = TRUE, copy.date = TRUE)
+  invisible(to)
+}
+
+invalidation_check <- function(project, scripts, files, root, pipe_dir,
+                               pipeline, store, target_map, step_names,
+                               script_objects, script_written, targets,
+                               max_inputs = 10) {
+  inputs <- invalidation_inputs(project, scripts, files, script_written,
+                                tracked_files(pipe_dir, store), max_inputs)
+  stochastic <- vapply(targets, function(t) isTRUE(t$stochastic), TRUE)
+  names(stochastic) <- vapply(targets, function(t) t$target, "")
+  mapped <- names(target_map)[!vapply(target_map, is.null, TRUE)]
+  out <- list()
+  for (k in seq_along(inputs$test)) {
+    f <- inputs$test[[k]]
+    entry <- list(file = f, origin = inputs$origin[[f]])
+    # The scripts, from scratch, with the changed input.
+    sdir <- copy_project(project, file.path(root, sprintf("inv-script-%d", k)), files)
+    if (!perturb_file(file.path(sdir, f))) {
+      entry$result <- "not_tested"
+      entry$detail <- "can't change this file safely"
+      out[[length(out) + 1]] <- entry
+      next
+    }
+    snap <- file.path(root, sprintf("inv-objects-%d.rds", k))
+    run <- run_scripts(sdir, scripts, as.character(step_names), snap)
+    if (!is.null(run$failure)) {
+      entry$result <- "not_tested"
+      entry$detail <- paste("the scripts fail with the changed file:", run$failure$message)
+      out[[length(out) + 1]] <- entry
+      next
+    }
+    changed_objects <- readRDS(snap)
+    changed_steps <- step_names[vapply(step_names, function(s)
+      !values_match(changed_objects[[s]], script_objects[[s]]), TRUE)]
+    # The built Pipeline, with the same change.
+    pdir <- copy_dir(pipe_dir, file.path(root, sprintf("inv-pipe-%d", k)))
+    perturb_file(file.path(pdir, f))
+    outdated <- with_wd(pdir, tryCatch(
+      targets::tar_outdated(script = pipeline, store = store, reporter = "silent"),
+      error = function(e) character()))
+    err <- build_pipeline(pdir, script = pipeline, store = store)
+    rows <- list()
+    for (t in mapped) {
+      step <- target_map[[t]]
+      changed <- step %in% changed_steps
+      reran <- t %in% outdated
+      verdict <- if (isTRUE(stochastic[t])) "stochastic"
+        else if (changed && !reran) "hidden_dependency"
+        else if (!changed && reran) "extra_rerun"
+        else if (changed) "reran"
+        else "unaffected"
+      if (verdict == "reran" && is.null(err)) {
+        v <- tryCatch(read_target(pdir, t, store), error = function(e) NULL)
+        if (!values_match(v, changed_objects[[step]])) verdict <- "mismatch_after_change"
+      }
+      rows[[length(rows) + 1]] <- list(target = t, step = step, result = verdict)
+    }
+    entry$targets <- rows
+    bad <- vapply(rows, function(r) r$result %in% c("hidden_dependency",
+                                                     "mismatch_after_change"), TRUE)
+    entry$result <- if (!is.null(err)) "error"
+      else if (any(bad)) "fail"
+      else if (!length(changed_steps) && !length(intersect(outdated, mapped))) "unused"
+      else "pass"
+    if (!is.null(err)) entry$detail <- paste("Pipeline failed with the changed file:", err)
+    out[[length(out) + 1]] <- entry
+    unlink(c(sdir, pdir), recursive = TRUE)
+  }
+  list(inputs = out, not_tested = I(inputs$skipped),
+       max_inputs = max_inputs)
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
                            max_copy_mb = 1024, allow_large = FALSE,
-                           keep = FALSE, pipeline = "_targets.R") {
+                           keep = FALSE, pipeline = "_targets.R",
+                           invalidation = TRUE, max_inputs = 10) {
   store <- store_for(pipeline)
   project <- normalizePath(project, winslash = "/", mustWork = TRUE)
   result <- list(mode = mode, pipeline = pipeline, store = store, status = NULL, static = NULL, targets = list(),
@@ -1361,9 +1549,31 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
       paste(result$outdated_after_build, collapse = ", "),
       "- it changes its own inputs (a file it reads and then overwrites?).",
       "Write to another path and list it in the Step Map's redirected_files.")))
-  result$status <- if (any(bad_targets) || any(bad_files) ||
-                       length(result$outdated_after_build)) "not_equivalent"
-    else "equivalent"
+  bad <- any(bad_targets) || any(bad_files) || length(result$outdated_after_build)
+
+  # 5. The Invalidation Check, once the plain comparison passes.
+  if (!bad && invalidation) {
+    result$invalidation <- invalidation_check(
+      project, scripts, files, root, pipe_dir, pipeline, store, target_map,
+      as.character(step_names), script_objects, script_written,
+      result$targets, max_inputs)
+    for (inp in result$invalidation$inputs) {
+      hidden <- Filter(function(r) r$result == "hidden_dependency", inp$targets %||% list())
+      wrong <- Filter(function(r) r$result == "mismatch_after_change", inp$targets %||% list())
+      if (length(hidden)) result$errors <- c(result$errors, list(sprintf(paste(
+        "Hidden dependency: changing %s changes %s in the scripts, but the Pipeline",
+        "still thinks %s up to date. Track the file (tar_file_read(), or tar_target(...,",
+        "format = \"file\") passed to the function that reads it)."),
+        inp$file, paste0("`", vapply(hidden, function(r) r$step, ""), "`", collapse = ", "),
+        if (length(hidden) > 1) "they are" else "it is")))
+      if (length(wrong)) result$errors <- c(result$errors, list(sprintf(
+        "After changing %s, %s reran but no longer match the scripts.", inp$file,
+        paste0("`", vapply(wrong, function(r) r$target, ""), "`", collapse = ", "))))
+      if (identical(inp$result, "error")) result$errors <- c(result$errors, list(inp$detail))
+      if (inp$result %in% c("fail", "error")) bad <- TRUE
+    }
+  }
+  result$status <- if (bad) "not_equivalent" else "equivalent"
   result
 }
 
@@ -1373,12 +1583,13 @@ EXIT_CODES <- c(equivalent = 0, static_pass = 0, not_checked = 0,
 
 parse_args <- function(args) {
   opts <- list(pipeline = "_targets.R", mode = "equivalence", max_copy_mb = 1024, allow_large = FALSE,
-               keep = FALSE, map = NULL, out = NULL)
+               keep = FALSE, map = NULL, out = NULL, skip_invalidation = FALSE,
+               max_inputs = 10)
   i <- 1
   while (i <= length(args)) {
     key <- sub("^--", "", args[[i]])
     key <- gsub("-", "_", key)
-    if (key %in% c("allow_large", "keep")) {
+    if (key %in% c("allow_large", "keep", "skip_invalidation")) {
       opts[[key]] <- TRUE
       i <- i + 1
     } else {
@@ -1399,7 +1610,8 @@ main <- function(args = commandArgs(trailingOnly = TRUE)) {
   result <- tryCatch(
     targetfy_check(opts$project, opts$scripts, map, opts$mode,
                    opts$max_copy_mb, opts$allow_large, opts$keep,
-                   opts$pipeline),
+                   opts$pipeline, invalidation = !opts$skip_invalidation,
+                   max_inputs = as.numeric(opts$max_inputs)),
     error = function(e) list(status = "error", errors = list(conditionMessage(e)))
   )
   json <- jsonlite::toJSON(result, auto_unbox = TRUE, pretty = TRUE,

@@ -414,3 +414,69 @@ test_that("a load_all() package with imports = is equivalent", {
   expect_equal(res$status, "equivalent")
   expect_equal(target_result(res, "y")$result, "match")
 })
+
+# --- v2: Invalidation Check ----------------------------------------------------
+
+input_result <- function(res, file) {
+  Filter(function(i) i$file == file, res$invalidation$inputs)[[1]]
+}
+
+test_that("changing each input reruns exactly what changes in the scripts", {
+  res <- run_pipeline("hidden", "taxes.R", "_targets.R")
+  expect_equal(res$status, "equivalent")
+  expect_equal(input_result(res, "data/rates.csv")$result, "pass")
+  expect_equal(input_result(res, "data/sales.csv")$origin, "read by the code")
+  expect_equal(input_result(res, "data/notes.txt")$result, "unused")
+})
+
+test_that("an input read inside a function without tracking is a hidden dependency", {
+  res <- run_pipeline("hidden", "taxes.R", "targets_untracked.R")
+  expect_equal(res$status, "not_equivalent")
+  rates <- input_result(res, "data/rates.csv")
+  expect_equal(rates$result, "fail")
+  expect_equal(rates$origin, "data file in the project")   # the scan couldn't see it
+  expect_true(all(vapply(rates$targets, function(t) t$result, "") == "hidden_dependency"))
+  expect_match(res$errors[[1]], "Hidden dependency: changing data/rates.csv")
+})
+
+test_that("the invalidation check can be skipped", {
+  res <- run_pipeline("hidden", "taxes.R", "targets_untracked.R", invalidation = FALSE)
+  expect_equal(res$status, "equivalent")
+  expect_null(res$invalidation)
+})
+
+test_that("files are changed in small, valid ways", {
+  f <- tempfile(fileext = ".csv")
+  writeLines(c("a,b", "1,2", "3,4", ""), f)
+  expect_true(check_env$perturb_file(f))
+  expect_equal(nrow(read.csv(f)), 3)
+  writeLines("a,b", f)
+  expect_false(check_env$perturb_file(f))
+  r <- tempfile(fileext = ".rds")
+  saveRDS(data.frame(x = 1:2), r)
+  expect_true(check_env$perturb_file(r))
+  expect_equal(nrow(readRDS(r)), 3)
+  saveRDS(list(a = 1), r)
+  expect_false(check_env$perturb_file(r))
+  expect_false(check_env$perturb_file(tempfile(fileext = ".xlsx")))
+})
+
+test_that("computed paths and session reads are flagged for review", {
+  scan <- check_env$flow_scan(file.path(fixtures, "hidden", "project"), "taxes.R")
+  hidden <- finding(scan, "hidden_input")
+  expect_equal(vapply(hidden, function(f) f$input, ""), c("dynamic_path", "session"))
+  expect_equal(hidden[[1]]$code, "read.csv(rates_file)")
+  expect_equal(hidden[[2]]$where, "taxes.R:6")
+})
+
+test_that("Targets downstream of an always-run Target don't count as outdated", {
+  dir <- tempfile(); dir.create(dir)
+  writeLines(c("today <- Sys.Date()", "label <- format(today)"), file.path(dir, "s.R"))
+  writeLines(c("library(targets)",
+               "list(tar_target(today, Sys.Date(), cue = tar_cue('always')),",
+               "     tar_target(label, format(today)))"), file.path(dir, "_targets.R"))
+  res <- check_env$targetfy_check(dir, "s.R",
+                                  list(targets = list(today = "today", label = "label")))
+  expect_equal(res$status, "equivalent")
+  expect_length(res$outdated_after_build, 0)
+})
