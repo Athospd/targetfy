@@ -67,7 +67,12 @@ Options, environment variables, seeds, memory and error handling are `pipeline_s
 ## `hidden_input`: inputs targets can't see
 
 - `dynamic_path`: a reader whose path is computed (`read.csv(rates_file)`). Work out which file it is and track it with `tar_file_read()`. The Invalidation Check tests every data file in the project anyway, so a miss shows up as a hidden dependency.
+- `url`: a reader or `download.file()` given a web address. Track it with `format = "url"` or `tar_download()` (`references/setup.md`). The Invalidation Check can't test it.
 - `session`: `Sys.getenv()`, `Sys.Date()`, `Sys.time()`, `getOption()`, `file.mtime()`, `file.info()`. targets doesn't track these values. Make each its own Target and pass it to the Steps that use it. If it should be read on every run (today's date, an environment variable), give that Target `cue = tar_cue("always")`. Then only its dependents rerun, and only when the value changes.
+
+## `unsaveable_object`: values that can't be Targets as they are
+
+Models from torch, keras or h2o, and connections, break when targets stores them with `saveRDS()`. Follow `references/setup.md` during the Conversion.
 
 ## `defined_later`: used before it's defined
 

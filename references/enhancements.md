@@ -15,11 +15,24 @@ Offer only the Enhancements whose condition holds, in this order:
 | Enhancement | Offer it when | How | House-style reference |
 |---|---|---|---|
 | Storage format | a Target holds a large R object, or a large data frame | `tar_qs()` (needs `qs2`), `tar_parquet()` (needs `arrow`), `tar_nanoparquet()`; when most Targets take the same format, set it once with `tar_option_set(format = "qs")` | `vendor/targets-r-skill/references/targets.md` |
-| Dynamic branching | a Step loops over groups, files or parameters (`for`, `lapply`, `purrr::map`, `split`) | `pattern = map(...)`, with an upstream Target holding the values to iterate over | `vendor/targets-r-skill/references/branching.md` |
+| Branching | a `branch_candidate` finding: a Step loops over files, groups, parameters or repetitions | by its `style`: `dynamic` → `pattern = map(...)`; `static` → `tar_map()`; `groups` → `tar_group_by()`; `replicate` → `tar_rep()` (below) | `vendor/targets-r-skill/references/branching.md` |
 | Parallel workers | branching or independent Targets mean several can run at once | `tar_option_set(controller = crew::crew_controller_local(workers = n))`; any `options()`/`Sys.setenv()` line in the setup must also go into `tar_hook_before()`, because workers don't run it (`references/setup.md`) | `vendor/targets-r-skill/references/performance.md` |
 | Render the document | a Source Script is a `.qmd` or `.Rmd` the user renders | a new copy of the notebook reads results with `tar_read()`, rendered by `tar_quarto()` or `tar_render()` (see below) | `vendor/targets-r-skill/references/literate.md` |
 
 If an Enhancement needs a package that isn't installed, offer it only together with the instruction to install that package: the user installs it, never targetfy.
+
+## Branching
+
+Each `branch_candidate` finding has a `style` that picks the tool. Follow that recipe, then the common rules (*Dynamic branching* below, steps 4–6: rebuild the script's object under its old name, and map only that).
+
+| `style` | The script | The Pipeline | Rebuilding the script's object |
+|---|---|---|---|
+| `dynamic` | a loop or `lapply()` over files or a computed vector | `pattern = map(<values Target>)` | see below |
+| `static` | a loop over a short literal list: `for (deg in c(1, 2, 3))` | `fit_by_degree <- tar_map(values = list(deg = degrees), tar_target(fit, fit_poly(d, deg)))`, defined above `list()` | `tar_combine(fits, fit_by_degree, command = setNames(list(!!!.x), as.character(degrees)))`: the combined Targets are named `fit_1`, `fit_2`..., so restore the script's names |
+| `groups` | `lapply(split(d, d$g), f)`, `group_map()` | `tar_group_by(groups, d, g)` (needs `dplyr`), then `tar_target(x, f_one(groups), pattern = map(groups), iteration = "list")` | the per-group function returns `setNames(list(value), part$g[[1]])`; combine with `do.call(c, unname(x))`. Groups come out sorted, as `split()` sorts them |
+| `replicate` | `replicate(100, mean(rnorm(20)))`, or a loop over `1:n` drawing random numbers | `tar_rep(sims_reps, mean(rnorm(20)), batches = 4, reps = 25)`: batches, not one branch per repetition | `tar_target(sims, unname(sims_reps))`: `tar_rep()` names every repetition. The values are random, so they're compared by structure |
+
+Prefer `static` only when the values are few, known in advance and worth reading in the graph (models, scenarios). For a list computed from data, use `dynamic`. For more than a few hundred iterations, batch them: `tar_rep()` for repetitions, or a `pattern = map()` over chunks of the input.
 
 ## Dynamic branching
 

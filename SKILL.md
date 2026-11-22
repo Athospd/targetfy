@@ -22,6 +22,7 @@ Turn a **Script Sequence** (one or more `.R` files or R notebooks, listed by the
    - Never mention the size or number of the folder's other files: they're out of scope, and naming them makes it sound as if they'll be loaded.
 3. **Accept `.R` files and notebooks:** `.qmd`, `.Rmd`, `.md` and `.ipynb` with an R kernel. A notebook's R code chunks or cells, in order, are its Source Script (`references/notebooks.md`). Stop with a clear message for:
    - an `.ipynb` with a Python (or other non-R) kernel: only R notebooks are supported;
+   - a file that is already targets code. `read.json` gives it a `targets_role` and an `already_targets` finding: a Pipeline script (`tar_target()`, `tar_plan()`), a driver (`tar_make()`), or a report that reads Targets (`tar_read()`, `tar_load()`). Say what it is. A report of an existing Pipeline belongs in that Pipeline as `tar_quarto()`/`tar_render()`. Convert the other files of the Sequence, if any;
    - `.Rnw`, files inside an R package (a `DESCRIPTION` file next to `R/`), Shiny apps: these aren't linear analyses.
 4. **Choose the R installation.** People often have several R versions installed, with packages spread across them, and the `Rscript` on the PATH isn't always the one they use. Start any `Rscript`: the one on the PATH, or on Windows any `C:/Program Files/R/R-*/bin/Rscript.exe`. Then run:
 
@@ -46,6 +47,7 @@ Turn a **Script Sequence** (one or more `.R` files or R notebooks, listed by the
 
    - `<name>` is the file name, without its extension, of the first Source Script in the Script Sequence: `analysis.R` gives `targets_analysis.R`, a Sequence starting with `01_load.R` gives `targets_01_load.R`, and `report.qmd` gives `targets_report.R`.
    - When `_targets.R` exists, tell the user: "Since `_targets.R` already exists, I'm creating `targets_<name>.R` instead." Its own store keeps the existing pipeline's cached results untouched.
+   - With `targets_<name>.R`, also give it a targets project, so the user can run it without passing `script =` and `store =` every time. If `_targets.yaml` doesn't exist, create it (a Generated File) with `<chosen Rscript> -e 'targets::tar_config_set(script = "targets_<name>.R", store = "_targets_<name>", project = "<name>")'` from the project folder. The `main` project stays `_targets.R` and `_targets/`. If `_targets.yaml` already exists, don't change it: give the user that command in the report instead.
    - If the chosen Step Map or Conversion Report already exists, it's an earlier targetfy run. Ask before replacing those files.
    - Functions go in `R/` if it's absent or empty, otherwise in `R_targets/`. Tell the user which one.
 
@@ -110,6 +112,7 @@ Read `result.json` and act on its `status`:
   - A non-empty `outdated_after_build` means the Pipeline is out of date right after being built: it changes its own inputs, usually by overwriting a file it reads.
   - A "Hidden dependency" error comes from the Invalidation Check (`invalidation.inputs`): changing that file changes those Steps in the scripts, but the Pipeline doesn't rerun their Targets. A function reads the file itself. Track it with `tar_file_read()`, or with a `format = "file"` Target passed to that function. `mismatch_after_change` means the Targets reran but no longer match the scripts.
 - Inputs the Invalidation Check couldn't change (`not_tested`: `.xlsx`, binary files, nested `.rds`) or didn't reach (`invalidation.not_tested`, past `--max-inputs`) stay unverified for tracking. Say so in the report.
+- `display_errors` lists display-only lines (a bare name, a table, a plot, a leftover console call) that failed while the scripts ran. The check skipped them, because they change nothing the later code sees. Report each one: rendering the notebook would stop at that line.
 - **`not_checked`**: a package the code needs isn't installed (`missing_packages`), so the Static Check couldn't run. This is not a fault in the Conversion: don't change the Generated Files for it. Name the packages for the user and go to step 5.
 - **`error`**: the Pipeline failed to build, or a Source Script wasn't found. Treat a build failure like `not_equivalent`.
 - **`needs_confirmation`**: tell the user the copy size. Re-run with `--allow-large` or `--mode static`, as they choose.

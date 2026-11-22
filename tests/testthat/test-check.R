@@ -480,3 +480,106 @@ test_that("Targets downstream of an always-run Target don't count as outdated", 
   expect_equal(res$status, "equivalent")
   expect_length(res$outdated_after_build, 0)
 })
+
+# --- v2: more targets/tarchetypes tools ----------------------------------------
+
+test_that("branch candidates say which kind of branching fits", {
+  scan <- check_env$flow_scan(file.path(fixtures, "branch_styles", "project"), "analysis.R")
+  styles <- vapply(finding(scan, "branch_candidate"), function(f) f$style, "")
+  expect_equal(styles, c("static", "groups", "replicate"))
+  dir <- tempfile(); dir.create(dir)
+  writeLines(c("res <- numeric(50)", "for (i in 1:50) res[i] <- mean(rnorm(5))",
+               "files <- list.files('data')", "out <- lapply(files, nchar)"),
+             file.path(dir, "s.R"))
+  styles <- vapply(finding(check_env$flow_scan(dir, "s.R"), "branch_candidate"),
+                   function(f) f$style, "")
+  expect_equal(styles, c("replicate", "dynamic"))
+})
+
+test_that("tar_map(), tar_group_by() and tar_rep() Conversions are equivalent", {
+  res <- run_fixture("branch_styles", "analysis.R")
+  expect_equal(res$status, "equivalent")
+  expect_equal(target_result(res, "fits")$result, "match")
+  expect_equal(target_result(res, "group_means")$result, "match")
+  expect_equal(target_result(res, "sims")$result, "structure_match")
+})
+
+test_that("web inputs, connections and unsaveable models are flagged", {
+  dir <- tempfile(); dir.create(dir)
+  writeLines(c("library(torch)", "library(DBI)",
+               "d <- read.csv('https://example.org/d.csv')",
+               "download.file('https://example.org/z.zip', 'data/z.zip')",
+               "con <- dbConnect(RSQLite::SQLite(), 'db.sqlite')"), file.path(dir, "s.R"))
+  scan <- check_env$flow_scan(dir, "s.R")
+  urls <- Filter(function(f) identical(f$input, "url"), scan$findings)
+  expect_equal(vapply(urls, function(f) f$url, ""),
+               c("https://example.org/d.csv", "https://example.org/z.zip"))
+  objs <- vapply(finding(scan, "unsaveable_object"), function(f) f$object, "")
+  expect_setequal(objs, c("connection", "torch"))
+  reads <- unlist(lapply(scan$statements, function(s) unlist(s$files_read)))
+  expect_false(any(grepl("^https", reads)))
+})
+
+test_that("a _targets.yaml project entry leaves the check and the main project alone", {
+  dir <- tempfile(); dir.create(dir)
+  file.copy(list.files(file.path(fixtures, "existing_pipeline", "project"), full.names = TRUE),
+            dir, recursive = TRUE)
+  yaml <- file.path(dir, "_targets.yaml")
+  targets::tar_config_set(script = "targets_analysis.R", store = "_targets_analysis",
+                          project = "analysis", config = yaml)
+  expect_equal(targets::tar_config_get("script", project = "analysis", config = yaml),
+               "targets_analysis.R")
+  expect_equal(targets::tar_config_get("script", project = "main", config = yaml),
+               "_targets.R")
+  map <- jsonlite::read_json(file.path(dir, "targetfy-map_analysis.json"),
+                             simplifyVector = FALSE)
+  res <- check_env$targetfy_check(dir, "analysis.R", map, pipeline = "targets_analysis.R",
+                                  invalidation = FALSE)
+  expect_equal(res$status, "equivalent")
+})
+
+# --- v2: patterns from a real targets repository ---------------------------------
+
+rw_dir <- file.path(fixtures, "realworld", "project")
+
+test_that("a real-style notebook: labels, cache, versions and display lines", {
+  t <- check_env$tangle(file.path(rw_dir, "inst", "tuning.Rmd"))
+  labels <- vapply(t$chunks, function(c) as.character(c$label), "")
+  expect_equal(labels[1:3], c("setup", "data", NA))
+  expect_length(grep("cache = TRUE", t$warnings), 2)
+  scan <- check_env$flow_scan(rw_dir, "inst/tuning.Rmd")
+  re <- finding(scan, "reassigned")
+  versions <- stats::setNames(vapply(re, function(f) f$versions, 0),
+                              vapply(re, function(f) f$name, ""))
+  expect_equal(versions[["fits"]], 2)
+  expect_true(all(c("grid", "best", "d") %in% names(versions)))
+  disp <- finding(scan, "display_only")[[1]]
+  expect_true(all(c("inst/tuning.Rmd:15", "inst/tuning.Rmd:38",
+                    "inst/tuning.Rmd:39") %in% unlist(disp$where)))
+})
+
+test_that("a failing display-only line is skipped and reported, plots write no file", {
+  res <- run_pipeline("realworld", "inst/tuning.Rmd", "targets_tuning.R")
+  expect_equal(res$status, "equivalent")
+  expect_null(res$script_failure)
+  expect_equal(res$display_errors[[1]]$where, "inst/tuning.Rmd:39")
+  expect_match(res$display_errors[[1]]$message, "leftover_from_the_console")
+  expect_length(res$files, 0)   # no Rplots.pdf
+})
+
+test_that("a statement that changes something is never skipped on error", {
+  expect_true(check_env$is_display_only(quote(head(d))))
+  expect_true(check_env$is_display_only(quote(d$x)))
+  expect_false(check_env$is_display_only(quote(x <- f())))
+  expect_false(check_env$is_display_only(quote(stopifnot(nrow(d) > 0))))
+  expect_false(check_env$is_display_only(quote(write.csv(d, "out.csv"))))
+  expect_false(check_env$is_display_only(quote(library(dplyr))))
+  expect_false(check_env$is_display_only(quote(tar_option_set(packages = "x"))))
+})
+
+test_that("files that are already targets code are recognised", {
+  scan <- check_env$flow_scan(rw_dir, c("report.qmd", "_targets_other.R"))
+  roles <- vapply(finding(scan, "already_targets"), function(f) f$role, "")
+  expect_equal(roles, c("report", "pipeline"))
+  expect_equal(scan$scripts[["report.qmd"]]$targets_role, "report")
+})

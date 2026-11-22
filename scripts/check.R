@@ -155,9 +155,11 @@ tangle_text <- function(lines, ext) {
     body_idx <- if (j > i + 1L) seq.int(i + 1L, j - 1L) else integer()
     body <- substring(lines[body_idx], nchar(indent) + 1L)
     opt_lines <- grep("^#\\|", body, value = TRUE)
-    label <- sub("^[ \t,]*([^ ,=]+)([ \t,].*)?$", "\\1", header)
-    label <- if (nzchar(trimws(header)) && !grepl("=", strsplit(header, ",")[[1]][1]))
-      trimws(label) else NA_character_
+    # The label is the first option when it has no `=`: {r load, cache=TRUE},
+    # but not {r, fig.height=8} or {r fig.height=8}.
+    first <- trimws(strsplit(trimws(header), "[ \t]*,[ \t]*|[ \t]+")[[1]][1])
+    label <- if (length(first) && !is.na(first) && nzchar(first) && !grepl("=", first))
+      first else NA_character_
     yl <- sub("^#\\|[ \t]*label:[ \t]*", "", grep("^#\\|[ \t]*label:", opt_lines, value = TRUE))
     if (length(yl)) label <- trimws(yl[[1]])
     is_code <- lang == "r" && (braced || !braced_only)
@@ -171,7 +173,12 @@ tangle_text <- function(lines, ext) {
         skipped[[length(skipped) + 1]] <- list(line = i, lang = "r",
           label = label, reason = "eval = FALSE: never runs")
       } else {
-        if (grepl("eval[ \t]*=", header) || any(grepl("^#\\|[ \t]*eval:", opt_lines)))
+        if (grepl("cache[ \t]*=[ \t]*(TRUE|T)\\b", header) ||
+            any(grepl("^#\\|[ \t]*cache:[ \t]*true", opt_lines)))
+          warnings <- c(warnings, sprintf(
+            "line %d: chunk has cache = TRUE: knitr's cache is what targets replaces; its Steps are the first candidates for their own Targets", i))
+        if (grepl("eval[ \t]*=[ \t]*(?!(TRUE|T)\\b)", header, perl = TRUE) ||
+            any(grepl("^#\\|[ \t]*eval:[ \t]*(?!true\\b)", opt_lines, perl = TRUE)))
           warnings <- c(warnings, sprintf(
             "line %d: chunk `eval` set by an expression; treated as running", i))
         if (grepl("error[ \t]*=[ \t]*(TRUE|T)\\b", header) ||
@@ -303,7 +310,7 @@ APPLY_FUNS <- c("lapply", "sapply", "vapply", "Map", "mapply", "map",
   "mclapply", "group_map", "by", "tapply")
 CARRY_FUNS <- c("Reduce", "accumulate", "reduce")
 SETUP_FIELDS <- c("sourced", "list_dirs", "libraries", "global_code", "dev_paths",
-                  "dynamic_reads", "session_reads")
+                  "dynamic_reads", "session_reads", "urls")
 # Reads of session state targets can't see: a Target using them doesn't
 # rerun when they change.
 SESSION_READS <- c("Sys.getenv", "Sys.Date", "Sys.time", "date", "getOption",
@@ -359,6 +366,7 @@ new_flow <- function() {
   st$libraries <- character(); st$global_code <- character()
   st$seed <- NULL; st$dev_paths <- character()
   st$dynamic_reads <- character(); st$session_reads <- character()
+  st$urls <- character(); st$apply_over <- list()
   st
 }
 
@@ -419,7 +427,7 @@ flow_walk <- function(e, st) {
     flow_walk(e[[3]], st)
     var <- as.character(e[[2]])
     st$loops[[length(st$loops) + 1]] <- list(kind = "for", var = var,
-      over = paste(deparse(e[[3]]), collapse = " "), body = body)
+      over = paste(deparse(e[[3]]), collapse = " "), over_expr = e[[3]], body = body)
     st$writes <- c(st$writes, var, body$writes)
     st$reads <- c(st$reads, body$reads)
     for (f in c("files_read", "files_written", "flags", "applies", SETUP_FIELDS))
@@ -483,7 +491,8 @@ flow_walk <- function(e, st) {
   }
   if (fname %in% READ_FUNS) {
     p <- file_arg(e, 1)
-    if (!is.null(p)) st$files_read <- c(st$files_read, p)
+    if (!is.null(p) && grepl("^(https?|ftp)://", p)) st$urls <- c(st$urls, p)
+    else if (!is.null(p)) st$files_read <- c(st$files_read, p)
     else if (length(args)) st$dynamic_reads <- c(st$dynamic_reads,
                                                  paste(deparse(e), collapse = " "))
   }
@@ -493,7 +502,24 @@ flow_walk <- function(e, st) {
     p <- file_arg(e, WRITE_FUNS[[fname]])
     if (!is.null(p)) st$files_written <- c(st$files_written, p)
   }
-  if (fname %in% APPLY_FUNS) st$applies <- c(st$applies, fname)
+  if (fname %in% APPLY_FUNS) {
+    st$applies <- c(st$applies, fname)
+    if (length(args) && !identical(args[[1]], quote(expr = )))
+      st$apply_over[[length(st$apply_over) + 1]] <- args[[1]]
+  }
+  if (fname %in% c("replicate", "rerun")) st$flags <- c(st$flags, "replicate")
+  if (fname %in% c("split", "group_split")) st$flags <- c(st$flags, "split")
+  if (fname %in% c("group_map", "group_modify", "group_walk", "do"))
+    st$flags <- c(st$flags, "group_apply")
+  if (fname %in% c("download.file", "curl_download")) {
+    p <- file_arg(e, 1)
+    if (!is.null(p)) st$urls <- c(st$urls, p)
+    dest <- if (length(args) >= 2) literal_path(args[[2]]) else NULL
+    if (!is.null(dest)) st$files_written <- c(st$files_written, dest)
+  }
+  if (fname %in% c("dbConnect", "src_postgres", "src_mysql", "odbcConnect",
+                   "spark_connect", "h2o.init"))
+    st$flags <- c(st$flags, "connection")
   if (fname %in% CARRY_FUNS) st$flags <- c(st$flags, "carried_reduce")
   walk_args(args)
   invisible(st)
@@ -693,7 +719,51 @@ setup_findings <- function(project, statements) {
             "`imports` makes targets track the package's functions, so editing one reruns the ",
             "Targets that use it."), where(i), d))
   }
+  for (i in seq_along(statements)) {
+    st <- statements[[i]]$st
+    for (u in unique(st$urls))
+      add(kind = "hidden_input", input = "url", where = where(i), url = u,
+          message = sprintf(paste0(
+            "%s reads `%s` from the web. targets won't see it change, and the Invalidation ",
+            "Check can't change it. Track it with `tar_target(<name>_url, \"%s\", format = \"url\")` ",
+            "and read from that Target, or download it with `tarchetypes::tar_download()`, ",
+            "which tracks the URL and the downloaded file."), where(i), u, u))
+    if ("connection" %in% st$flags)
+      add(kind = "unsaveable_object", object = "connection", where = where(i),
+          message = sprintf(paste0(
+            "%s opens a connection (database, Spark, h2o). A connection can't be stored, ",
+            "so it must never be a Target: open it inside each function that needs it ",
+            "(and close it there with `on.exit()`). The query results are the Targets."),
+            where(i)))
+  }
   libs <- unique(unlist(lapply(statements, function(x) x$st$libraries)))
+  special <- list(
+    torch = c("torch", "luz"), keras = c("keras", "keras3", "tensorflow"),
+    h2o = "h2o", xgboost = "xgboost", rJava = "rJava")
+  for (kind in names(special)) {
+    hit <- intersect(libs, special[[kind]])
+    if (!length(hit)) next
+    add(kind = "unsaveable_object", object = kind, package = hit[[1]], where = NA,
+        message = switch(kind,
+          torch = paste0(
+            "`", hit[[1]], "` models and tensors can't be saved as plain RDS. Give the ",
+            "Targets that hold them a `tar_format()` that uses `torch::torch_save()` and ",
+            "`torch::torch_load()` (see references/setup.md), during the Conversion."),
+          keras = paste0(
+            "`", hit[[1]], "` models can't be saved as plain RDS. Give the Targets that hold ",
+            "them a `tar_format()` that uses `keras3::save_model()` and `keras3::load_model()`, ",
+            "during the Conversion."),
+          h2o = paste0(
+            "h2o models live in the h2o cluster, not in R. Save them with `h2o.saveModel()` ",
+            "inside the function and make the saved path a `format = \"file\"` Target."),
+          xgboost = paste0(
+            "xgboost models stored as RDS may not load in another xgboost version. ",
+            "Mention it; for long-lived pipelines, a `tar_format()` using `xgb.save.raw()` ",
+            "and `xgb.load.raw()` is safer."),
+          rJava = paste0(
+            "rJava objects point into the JVM and can't be stored. Keep them inside one ",
+            "Target's function and return plain R values.")))
+  }
   for (pkg in libs[vapply(libs, is_local_package, TRUE)])
     add(kind = "pipeline_setup", setup = "local_package", package = pkg, where = NA,
         suggest = sprintf("tar_option_set(packages = c(..., \"%s\"), imports = \"%s\")", pkg, pkg),
@@ -704,6 +774,37 @@ setup_findings <- function(project, statements) {
           pkg, pkg))
   out
 }
+
+# Which kind of branching fits a loop or apply call:
+# replicate: repetitions of random draws (over 1:n, or replicate());
+# groups: one iteration per group of a data frame (split(), group_map());
+# static: a short literal list of values, each worth a readable name;
+# dynamic: anything else.
+branch_style <- function(over, reads, flags) {
+  if (!is.null(over) && is_count_seq(over) && any(reads %in% RANDOM_FUNS)) return("replicate")
+  if (any(c("split", "group_apply") %in% flags)) return("groups")
+  if (!is.null(over) && is_short_literal(over)) return("static")
+  "dynamic"
+}
+
+is_count_seq <- function(e) {
+  is.call(e) && (identical(e[[1]], quote(`:`)) ||
+                   call_name(e) %in% c("seq_len", "seq", "seq_along"))
+}
+
+is_short_literal <- function(e, max = 10) {
+  vals <- if (is.atomic(e)) e
+    else if (is.call(e) && identical(e[[1]], quote(c)) &&
+             all(vapply(as.list(e)[-1], is.atomic, TRUE))) unlist(as.list(e)[-1])
+    else return(FALSE)
+  length(vals) >= 1 && length(vals) <= max
+}
+
+BRANCH_ADVICE <- c(
+  dynamic = "A candidate for dynamic branching: `pattern = map(...)`.",
+  static = "Its values are a short literal list: a candidate for static branching with `tarchetypes::tar_map()`, which gives each value a readable Target name.",
+  replicate = "It repeats random draws: a candidate for `tarchetypes::tar_rep()` (batches of repetitions, each with its own seed), rather than one branch per repetition.",
+  groups = "It works group by group: a candidate for `tarchetypes::tar_group_by()` plus `pattern = map(<groups>)`.")
 
 flow_scan <- function(project, scripts) {
   statements <- list(); script_info <- list()
@@ -755,15 +856,25 @@ flow_scan <- function(project, scripts) {
       cycle_txt <- if (cycle) sprintf(
         ", and the new version reads that result: one `%s` Target would depend on itself", v)
         else ""
+      # Every version: a new one starts at each write that follows a use.
+      starts <- w[[1]]
+      for (k in seq_along(w)[-1])
+        if (any(users > w[[k - 1]] & users < w[[k]])) starts <- c(starts, w[[k]])
+      versions <- length(starts)
       add(kind = "reassigned", name = v, used_at = statements[[r]]$where,
           used_by = I(setdiff(writes_of[[r]], v)),
           changed_at = statements[[first_later]]$where, cycle = cycle,
+          versions = versions,
+          version_starts = I(vapply(starts, function(k) statements[[k]]$where, "")),
           message = sprintf(paste0(
             "`%s` is changed at %s after %s used it to build `%s`%s. ",
+            "In all it holds %d versions (starting at %s). ",
             "Give each version its own Target (for example `%s` and `%s_<what changed>`); ",
             "map only the last one to `%s`."),
             v, statements[[first_later]]$where, statements[[r]]$where,
             paste(setdiff(writes_of[[r]], v), collapse = "`, `"), cycle_txt,
+            versions, paste(vapply(starts, function(k) statements[[k]]$where, ""),
+                            collapse = ", "),
             v, v, v))
       break
     }
@@ -810,21 +921,26 @@ flow_scan <- function(project, scripts) {
               if (length(cl$carried)) paste0("`", cl$carried, "`", collapse = ", ")
               else "it runs until a condition changes"))
       } else {
+        style <- branch_style(lp$over_expr, lp$body$reads, st$flags)
         add(kind = "branch_candidate", where = statements[[i]]$where,
-            via = "for", over = lp$over, collects = I(cl$collects),
-            message = sprintf(paste0(
-              "The for loop at %s over `%s` has independent iterations (it fills %s): ",
-              "a candidate for dynamic branching."),
+            via = "for", over = lp$over, collects = I(cl$collects), style = style,
+            message = paste(sprintf(paste0(
+              "The for loop at %s over `%s` has independent iterations (it fills %s)."),
               statements[[i]]$where, lp$over,
               if (length(cl$collects)) paste0("`", cl$collects, "`", collapse = ", ")
-              else "nothing kept"))
+              else "nothing kept"), BRANCH_ADVICE[[style]]))
       }
     }
-    if (length(st$applies) && !"source" %in% st$reads) {
+    if ((length(st$applies) || "replicate" %in% st$flags) && !"source" %in% st$reads) {
+      over <- if (length(st$apply_over)) st$apply_over[[1]] else NULL
+      style <- if ("replicate" %in% st$flags) "replicate"
+        else branch_style(over, st$reads, st$flags)
+      via <- if (length(st$applies)) st$applies[[1]] else "replicate"
       add(kind = "branch_candidate", where = statements[[i]]$where,
-          via = st$applies[[1]], over = NA, collects = I(writes_of[[i]]),
-          message = sprintf("`%s()` at %s applies a function to each element: a candidate for dynamic branching.",
-                            st$applies[[1]], statements[[i]]$where))
+          via = via, over = if (is.null(over)) NA else paste(deparse(over), collapse = " "),
+          collects = I(writes_of[[i]]), style = style,
+          message = paste(sprintf("`%s()` at %s applies a function to each element.",
+                                  via, statements[[i]]$where), BRANCH_ADVICE[[style]]))
     }
     flags <- unique(st$flags)
     msgs <- c(
@@ -840,6 +956,43 @@ flow_scan <- function(project, scripts) {
   }
 
   findings <- c(findings, setup_findings(project, statements))
+
+  # Lines that only display something, per script.
+  for (s in scripts) {
+    idx <- which(vapply(statements, function(x) x$script == s &&
+                          is_display_only(x$expr), TRUE))
+    if (!length(idx)) next
+    wh <- vapply(statements[idx], function(x) x$where, "")
+    add(kind = "display_only", script = s, where = I(wh),
+        message = sprintf(paste0(
+          "%d statement(s) in %s only display a result (%s%s). They build nothing: drop them ",
+          "and list them under \"Lines left out\" (or keep them in a rendered document copy). ",
+          "If one errors, the check skips it and reports it under `display_errors`."),
+          length(idx), s, paste(utils::head(wh, 8), collapse = ", "),
+          if (length(wh) > 8) ", ..." else ""))
+  }
+
+  # Source Scripts that are already targets code.
+  for (s in scripts) {
+    nm <- unique(unlist(lapply(Filter(function(x) x$script == s, statements),
+                               function(x) all.names(x$expr))))
+    role <- if (any(c("tar_target", "tar_plan", "tar_map", "tar_file_read",
+                      "tar_quarto", "tar_render") %in% nm)) "pipeline"
+      else if (any(c("tar_make", "tar_make_future", "tar_make_clustermq") %in% nm)) "driver"
+      else if (any(c("tar_read", "tar_load", "tar_read_raw", "tar_load_everything") %in% nm)) "report"
+      else NULL
+    if (is.null(role)) next
+    script_info[[s]]$targets_role <- role
+    add(kind = "already_targets", script = s, role = role,
+        message = switch(role,
+          pipeline = sprintf("%s already defines Targets: it's a Pipeline, not a Source Script. Stop: there's nothing to convert.", s),
+          driver = sprintf("%s runs an existing Pipeline (`tar_make()`). Stop: convert the scripts that Pipeline replaces, if any, not this one.", s),
+          report = sprintf(paste0(
+            "%s reads results from an existing Pipeline (`tar_read()`/`tar_load()`): it's a ",
+            "report of that Pipeline, not an analysis to convert, and it can't run outside ",
+            "it. Stop, and suggest rendering it from that Pipeline with `tar_quarto()` or ",
+            "`tar_render()` if it isn't already."), s)))
+  }
 
   # 4. Names used before the statement that defines them.
   for (i in seq_len(n)) for (v in reads_of[[i]]) {
@@ -875,10 +1028,15 @@ run_scripts_session <- function(wd, specs, names, out) {
   stubs$install.packages <- function(...) invisible(NULL)
   stubs$View <- function(...) invisible(NULL)
   attach(stubs, name = "targetfy_stubs", warn.conflicts = FALSE)
+  # Plots drawn only to look at would otherwise land in Rplots.pdf, which
+  # isn't a result: draw them nowhere, as an interactive session shows
+  # them on screen.
+  options(device = function(...) grDevices::pdf(file = NULL))
   # Evaluate one top-level expression at a time, so a failure can be
   # reported with its script and line. A notebook's code runs from its own
   # folder, as knitting does.
   failure <- NULL
+  display_errors <- list()
   for (sp in specs) {
     exprs <- tryCatch(parse(text = sp$code, keep.source = TRUE),
                       error = function(e) e)
@@ -892,6 +1050,15 @@ run_scripts_session <- function(wd, specs, names, out) {
     for (i in seq_along(exprs)) {
       msg <- tryCatch({ eval(exprs[[i]], globalenv()); NULL },
                       error = function(e) conditionMessage(e))
+      if (!is.null(msg) && isTRUE(sp$display[i])) {
+        # A line that only displays something failed: it changes nothing
+        # later code sees, so note it and carry on. Knitting would stop here.
+        k <- refs[[i]][[1]]
+        display_errors[[length(display_errors) + 1]] <- list(
+          script = sp$script, line = sp$src[[k]], where = sp$labels[[k]],
+          message = msg, code = paste(as.character(refs[[i]]), collapse = "\n"))
+        next
+      }
       if (!is.null(msg)) {
         k <- refs[[i]][[1]]
         failure <- list(script = sp$script, line = sp$src[[k]],
@@ -907,7 +1074,32 @@ run_scripts_session <- function(wd, specs, names, out) {
   present <- names[vapply(names, exists, logical(1), envir = globalenv(),
                           inherits = FALSE)]
   saveRDS(mget(present, envir = globalenv()), out)
-  list(failure = failure, present = present)
+  list(failure = failure, present = present, display_errors = display_errors)
+}
+
+# Calls that change something even though they assign nothing, and calls
+# whose failure must stop the run (assertions).
+SIDE_EFFECT_FUNS <- c("library", "require", "requireNamespace", "source",
+  "sys.source", "dir.create", "setwd", "install.packages", "Sys.sleep", "sink",
+  "dev.off", "unlink", "file.remove", "file.copy", "file.rename", "file.create",
+  "writeLines", "invisible", "suppressPackageStartupMessages", "options",
+  "Sys.setenv", "set.seed", "rm", "gc", "stop", "stopifnot", "warning",
+  "data", "load", "attach", "png", "pdf", "jpeg", "svg", "tiff", "bmp",
+  "ggsave", "saveRDS", "save", "if", "for", "while", "repeat",
+  "{", "(", "assert_that", "validate", "tar_option_set", "tar_source",
+  "tar_config_set", "Sys.setlocale")
+
+# A top-level statement that only displays something: a lone name, a
+# table, a plot, a printed summary. It changes nothing later code sees.
+is_display_only <- function(e) {
+  if (is.symbol(e)) return(TRUE)
+  if (!is.call(e)) return(FALSE)
+  if (call_name(e) %in% SIDE_EFFECT_FUNS) return(FALSE)
+  st <- new_flow()
+  flow_walk(e, st)
+  !length(stats::na.omit(st$writes)) && !length(st$files_written) &&
+    !length(st$sourced) && !length(st$libraries) && !length(st$urls) &&
+    !length(st$global_code) && !length(st$dev_paths) && !length(st$flags)
 }
 
 # What each Source Script runs: its (tangled) code, where each line came
@@ -915,7 +1107,10 @@ run_scripts_session <- function(wd, specs, names, out) {
 script_specs <- function(wd, scripts) {
   lapply(scripts, function(s) {
     t <- tangle(file.path(wd, s))
+    exprs <- tryCatch(parse(text = t$code, keep.source = FALSE), error = function(e) NULL)
     list(script = s, code = t$code, src = t$src, cell = t$cell,
+         display = if (is.null(exprs)) logical() else
+           vapply(seq_along(exprs), function(k) is_display_only(exprs[[k]]), NA),
          labels = vapply(seq_along(t$code), function(i) origin_label(s, t, i), ""),
          wd = if (t$notebook) notebook_wd(wd, s) else ".")
   })
@@ -1425,6 +1620,7 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
     }
     return(result)
   }
+  if (length(run$display_errors)) result$display_errors <- run$display_errors
   script_written <- written_files(before, file_hashes(script_dir))
   script_objects <- readRDS(snapshot)
 

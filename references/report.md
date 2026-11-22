@@ -21,6 +21,12 @@ Only when the status isn't "equivalent" or "not equivalent". For example: `analy
 | sales_file | — | not compared | input file tracking |
 | model_fit | `fit` | unverified | after the failure point: this code never ran |
 
+## Display lines that failed
+From `result.json`'s `display_errors`: lines that only display something, which failed and were skipped. "None" when empty.
+| File:line | Code | Error |
+|---|---|---|
+| inst/tuning.Rmd:39 | `leftover_from_the_console()` | could not find function: rendering the notebook stops here |
+
 ## Changing one input
 From `result.json`'s `invalidation`: each input file was changed in a fresh copy, then the scripts and the Pipeline were rerun.
 | Input | Found as | Result | Notes |
@@ -69,8 +75,13 @@ What still fails after the last run, and what was tried each time.
 Filled in by the Enhancement wizard: each one offered, accepted or declined, and its check result.
 
 ## Run it
-`targets::tar_make()` builds the Pipeline; `targets::tar_visnetwork()` shows the graph.
-(For `targets_<name>.R`, pass the script and its store: `targets::tar_make(script = "targets_<name>.R", store = "_targets_<name>")`, and the same two arguments to `tar_visnetwork()` and `tar_read()`.)
+`targets::tar_make()` builds the Pipeline; `targets::tar_visnetwork()` shows the graph; `targets::tar_read(<target>)` loads a result.
+(For `targets_<name>.R` with a `_targets.yaml` project: `Sys.setenv(TAR_PROJECT = "<name>")`, then the same calls. Without one: pass `script = "targets_<name>.R", store = "_targets_<name>"` to each call, or run the `tar_config_set()` command from the conversion to create the project.)
+
+Tips for the Pipeline's later life (include those that apply):
+- A long build: `targets::tar_watch()` opens a live dashboard of progress, or `targets::tar_poll()` prints it in the console.
+- Debugging a failing Target: `tar_option_set(workspace_on_error = TRUE)`, then `targets::tar_workspace(<target>)` loads exactly what it ran with. `tar_meta(fields = error, complete_only = TRUE)` lists the errors.
+- What reruns next: `targets::tar_outdated()`, or the colours of `tar_visnetwork()`.
 ```
 
 For a notebook, name places as `read.json` does (`report.qmd:42`, `nb.ipynb:cell 3, line 2`), and list every path rewritten to be relative to the project.

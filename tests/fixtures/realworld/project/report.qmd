@@ -1,0 +1,9 @@
+---
+title: "Report of the existing Pipeline"
+---
+
+```{r}
+library(targets)
+value <- tar_read(base_value)
+value
+```

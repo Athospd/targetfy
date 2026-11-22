@@ -18,6 +18,9 @@ A `.qmd`, `.Rmd`, `.md` or `.ipynb` (R kernel) notebook is a Source Script like 
 - **Skipped chunks** (`eval = FALSE`, other languages) never ran when the document was rendered. Leave them out and list them under "Lines left out", with their line and reason. A `{sql}` chunk with `output.var` creates an R object: treat that name as an Unresolved Object.
 - **`read.json` warnings**: a chunk with `error = TRUE` (knitting continues past its errors; the check doesn't), `eval` set by an expression, or `<<label>>` chunk reuse. Mention each one in the report.
 - Drop `knitr::opts_chunk$set()` and `knitr::opts_knit$set()`, which only configure knitting.
+- **`cache = TRUE` chunks** (a `read.json` warning) are where the author already wanted caching. Their Steps should be their own Targets, which is exactly what targets does better than knitr's cache.
+- **Display-only lines** (`display_only` finding): a lone name, `glimpse()`, a table, a plot, an `autoplot()`. Notebooks are full of them. Drop them from the Pipeline and list them under "Lines left out", or keep them in the Render Enhancement's document copy. Notebooks also carry leftovers from the console (`step_corr()` with no recipe), which make knitting fail. The check skips a failing display-only line and reports it in `display_errors`, so the rest of the notebook is still compared. Tell the user that the notebook itself doesn't render at that line.
+- **Plots** drawn only to look at go to a null device during the check, so they don't leave an `Rplots.pdf` that would count as a written file.
 
 ## Where the code runs
 

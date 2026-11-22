@@ -1,0 +1,40 @@
+---
+title: "Tuning"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r data}
+d <- data.frame(x = 1:40, y = (1:40) * 0.5 + sin(1:40))
+```
+
+```{r, fig.height=8}
+plot(d$x, d$y)
+```
+
+## Step 1
+
+```{r, cache=TRUE}
+grid <- c(1, 2)
+fits <- lapply(grid, function(k) lm(y ~ poly(x, k), data = d))
+best <- grid[which.min(sapply(fits, AIC))]
+```
+
+The best degree is `r best`.
+
+## Step 2
+
+```{r, cache=TRUE}
+grid <- c(best, best + 1, best + 2)
+fits <- lapply(grid, function(k) lm(y ~ poly(x, k), data = d))
+best <- grid[which.min(sapply(fits, AIC))]
+d$fitted <- fitted(fits[[which(grid == best)]])
+```
+
+```{r}
+d$fitted[1:3]
+leftover_from_the_console()
+```

@@ -50,3 +50,41 @@ list(...)
   - `local_package` (installed from local source, with no repository or remote): ask the user whether to add `imports = "<pkg>"`, and recommend it.
   - `dev_package` (`pkgload::load_all("mypkg")` / `devtools::load_all()`): put `pkgload::load_all("<path>", quiet = TRUE)` at the top of the Pipeline script, and set `imports = "<package name>"` (the `Package:` field of its `DESCRIPTION`, not the folder). Don't add it to `packages`, because it isn't installed.
 - `format`: never during a Conversion. When the storage-format Enhancement applies the same format to most Targets, set it once as `tar_option_set(format = "qs")` instead of per Target (`references/enhancements.md`).
+
+## Objects that can't be stored as RDS, and inputs outside the project
+
+targets stores each Target with `saveRDS()` by default. Some objects only point at memory outside R, so they break after storing. These rules apply **during the Conversion**, an exception to "leave storage formats alone", because without them the Pipeline is wrong rather than slow. `read.json` lists them as `unsaveable_object` and `hidden_input` with `input: "url"`.
+
+| Finding | What to do |
+|---|---|
+| `torch` (`torch`, `luz`) | give each Target holding a model or tensor the format below |
+| `keras` (`keras`, `keras3`, `tensorflow`) | the same pattern, with `keras3::save_model(object, path)` / `keras3::load_model(path)`; the path needs a `.keras` extension, so write to `paste0(path, ".keras")` and rename |
+| `h2o` | save the model with `h2o.saveModel()` inside the function, and return the path from a `format = "file"` Target |
+| `xgboost` | RDS works, but may not load in another xgboost version: mention it, and offer a `tar_format()` using `xgb.save.raw()` / `xgb.load.raw()` |
+| `rJava` | keep the Java objects inside one function; return plain R values |
+| `connection` (`dbConnect()`, `spark_connect()`) | never a Target: open it inside each function that needs it, `on.exit(DBI::dbDisconnect(con))`, and return the query result |
+| `url` (`read.csv("https://...")`) | `tar_target(sales_url, "https://...", format = "url")`, and read from it: `tar_target(sales, read.csv(sales_url))`. targets reruns when the server reports a new ETag or modification time |
+| `url` (`download.file(url, "data/z.zip")`) | `tarchetypes::tar_download(z_zip, urls = "https://...", paths = "data/z.zip")`, which tracks both the URL and the downloaded file |
+
+The `torch` format, from the `tar_format()` documentation:
+
+```r
+torch_format <- tar_format(
+  read = function(path) torch::torch_load(path),
+  write = function(object, path) torch::torch_save(obj = object, path = path),
+  marshal = function(object) {
+    con <- rawConnection(raw(), open = "wr")
+    on.exit(close(con))
+    torch::torch_save(object, con)
+    rawConnectionValue(con)
+  },
+  unmarshal = function(object) {
+    con <- rawConnection(object, open = "r")
+    on.exit(close(con))
+    torch::torch_load(con)
+  }
+)
+tar_target(net, train_net(data), format = torch_format)
+```
+
+Define `torch_format` in the Pipeline script, above `list()`. The Invalidation Check can't change a URL, so the report lists web inputs as untested.

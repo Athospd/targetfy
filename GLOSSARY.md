@@ -101,7 +101,7 @@ An optional, follow-up pass over an existing Pipeline that adds a `{targets}` fe
 _Avoid_: optimization, upgrade
 
 **Generated Files**:
-The new files targetfy writes next to the Source Script (the Pipeline, its functions, the Conversion Report and the Step Map, plus the Working Folder for a Loose Script); targetfy never modifies any existing file.
+The new files targetfy writes next to the Source Script (the Pipeline, its functions, the Conversion Report and the Step Map, plus the Working Folder for a Loose Script, a `_targets.yaml` project when there was none, and a document copy for the render Enhancement); targetfy never modifies any existing file.
 _Avoid_: output, artifacts
 
 ### Output (borrowed from `{targets}`)

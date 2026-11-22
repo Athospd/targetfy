@@ -34,6 +34,7 @@ coefs <- summary(model)$coefficients  # Step `model_summary`
 - **Handoff Files** (`saveRDS()` in one script, `readRDS()` in a later one) become a direct dependency between Targets. Don't write the file.
 - **Notebooks** (`.qmd`, `.Rmd`, `.md`, `.ipynb`): convert their code as `read.R` extracts it, and rewrite paths relative to the project. See `references/notebooks.md`.
 - **Loops stay inside one function** during the Conversion, branchable or not. Branching is an Enhancement.
+- **Objects that can't be stored as RDS** (torch, keras, h2o, connections) and **web inputs** are the exception to the next rule: follow `references/setup.md` during the Conversion.
 - **Leave storage formats alone.** Don't set `format =`, `tar_qs()`, `tar_parquet()` or `{crew}` during a Conversion, even though the house style suggests `format = "qs"` by default. Those are Enhancements.
 
 ## Lines to drop

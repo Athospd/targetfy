@@ -98,6 +98,46 @@ One comparison run can't tell a tracked input from an untracked one: both sides 
 - **Scan side:** new `hidden_input` findings for readers with computed paths and for session reads (`Sys.getenv()`, `Sys.Date()`, `Sys.time()`, `getOption()`, file times), to be made explicit Targets (`cue = tar_cue("always")` where they must be read every run). `outdated_after_build` now exempts the Targets downstream of always-run and tolerated Targets.
 - **Not covered:** inputs that aren't files (databases, APIs). An input whose small change the scripts happen to ignore (deduplication, for example) shows as `unused` or `extra_rerun`, never as a false failure.
 
+## More targets and tarchetypes tools
+
+An internal review of the Enhancements found two correctness holes and several unused built-in tools.
+
+- **Correctness, handled during the Conversion:**
+  - objects that break as RDS (`torch`, `keras`, h2o models; connections) get a `tar_format()` or stay inside a function;
+  - web inputs get `format = "url"` or `tar_download()`.
+  - The scan flags them as `unsaveable_object` and `hidden_input: url`. URLs no longer count as file reads.
+- **The branching style:** each `branch_candidate` now carries a `style` that picks the tool. All three new recipes are equivalent in fixture `branch_styles`:
+  - `static`: a short literal list → `tar_map()` + `tar_combine()`. `tar_combine()` names the pieces `fit_1`..., so restore the script's names.
+  - `groups`: `split()`/`group_map()` → `tar_group_by()` + `pattern = map()`.
+  - `replicate`: `replicate()` or random draws over `1:n` → `tar_rep()` in batches. `tar_rep()` names each repetition, so `unname()` it.
+  - `dynamic`: everything else.
+- **A `_targets.yaml` project** for `targets_<name>.R`, created with `tar_config_set()` only when the file doesn't exist. `TAR_PROJECT` then replaces passing `script =` and `store =`. A test checks that the `main` project and the check are unaffected.
+- **Report tips:** `tar_watch()`/`tar_poll()`, `workspace_on_error` + `tar_workspace()`, `tar_outdated()`.
+- **Not verified here:** the torch and keras formats (neither package is installed), `format = "url"` and `tar_download()` (no network fixture).
+- **Deferred to v2.1:** `tar_render_rep()`/`tar_quarto_rep()`, `tar_change()`/`tar_age()`, `tar_renv()`, `tar_github_actions()`.
+
+## Tested against a real targets repository
+
+[targets-live](https://github.com/Athospd/targets-live), a teaching repository, has:
+- a 492-line tidymodels `.Rmd` tuned in five steps;
+- `.qmd` reports that call `tar_read()`;
+- three Pipeline scripts;
+- a `_targets.yaml` that points `main` at `_targets_parallel.R`.
+
+Running the scan and the check on it found and fixed:
+
+| Found | Fix |
+|---|---|
+| chunk headers like `{r, fig.height=12}` gave the options as the label | the label is the first option only when it has no `=` |
+| each reassigned variable was reported once; `telco_model` actually has 6 versions | `versions` and `version_starts` list them all |
+| `cache = TRUE` chunks weren't mentioned | a notebook warning: these Steps are the first candidates for their own Targets |
+| the notebook stopped at line 78, a console leftover (`step_corr()` with no recipe), so nothing could be compared; rendering fails there too | a failing display-only statement is skipped and reported (`display_errors`); a statement that assigns, writes, attaches or asserts is never skipped |
+| `plot()` in a non-interactive run writes `Rplots.pdf`, which counted as a file the scripts wrote | plots go to a null device during the script run |
+| the `.qmd` reports and `_targets_parallel.R` were treated as analyses | `already_targets` findings, with a `targets_role` of `pipeline`, `driver` or `report`; preflight stops on them |
+| 43 display-only lines in the notebook | `display_only` findings, per script |
+
+The existing `_targets.yaml` redirect didn't affect the check, since every call passes `script` and `store` explicitly. The offline fixture `realworld` reproduces these patterns without the network or tidymodels.
+
 ## Still out of scope
 
 - A granularity setting for Targets.
