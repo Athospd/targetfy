@@ -6,7 +6,9 @@ It never changes your files. It writes `_targets.R` (or `targets_<name>.R` when 
 
 Scripts aren't always DAGs: a variable changed after something used it, a file read and then overwritten, a loop whose iterations feed each other. Before converting, a flow scan finds these patterns, so the Pipeline gets one Target per version, writes to a new path instead of overwriting its own input, and keeps stateful loops whole. The check also fails any Pipeline that is out of date right after it's built. It then changes each input file, one at a time, and checks that the pipeline reruns exactly the targets whose results change in your scripts. An input read but not tracked (a hidden dependency) fails the check, instead of going stale later. Code that isn't a step goes into the Pipeline's setup: functions defined in the script and sourced helpers into `tar_source()`; `set.seed()`, `rm()`/`gc()` and in-house packages into `tar_option_set()`; `options()` before the targets.
 
-[![Watch the 34-second walkthrough: a real targetfy run, from the R script to the Pipeline, its DAG and the report](demo/walkthrough/thumbnail.png)](https://www.youtube.com/watch?v=f4F8yNo_d8Y)
+[![Watch what's new in v2 (45 seconds): notebooks, one Target per version, and the input-change check](demo/walkthrough-v2/thumbnail.png)](https://youtu.be/QkxKGYAg51Q)
+
+New to targetfy? The [34-second v1 walkthrough](https://www.youtube.com/watch?v=f4F8yNo_d8Y) shows a full run, from the R script to the Pipeline, its DAG and the report.
 
 ## Install
 
