@@ -8,22 +8,33 @@ allowed-tools: Read, Grep, Glob, Write, Edit, Bash
 
 Turn a **Script Sequence** (one or more `.R` files, listed by the user, in run order) into a `{targets}` **Pipeline** that is **Equivalent** to it: it produces the same final objects and written files. Terms are defined in `GLOSSARY.md` in this skill's folder. The bundled R check (`scripts/check.R`) decides whether a Conversion is accepted; your own judgement about Equivalence never replaces it.
 
-**Hard guardrail:** write only Generated Files: the Pipeline script, the functions folder, the Step Map and the Conversion Report, under the names chosen in preflight, plus the Working Folder for a Loose Script (step 1.3). Leave every existing file exactly as it is: Source Scripts, sourced helpers, data, `.Rprofile`, `renv.lock`. Use Edit only on Generated Files. Install nothing: when a package is missing, name it for the user and carry on.
+**Hard guardrail:** write only Generated Files: the Pipeline script, the functions folder, the Step Map and the Conversion Report, under the names chosen in preflight, plus the Working Folder for a Loose Script (step 1.2). Leave every existing file exactly as it is: Source Scripts, sourced helpers, data, `.Rprofile`, `renv.lock`. Use Edit only on Generated Files. Install nothing: when a package is missing, name it for the user and carry on.
 
 **Keep going.** Once preflight has fixed the Script Sequence and the names, targetfy always writes the Generated Files and the report. Anything that blocks verification (R or a package missing, scripts that fail to run) lowers how much gets checked, and the report and chat say exactly what was skipped and why. It never stops the Conversion.
 
 ## 1. Preflight
 
-1. **Find R.** Use `Rscript` on the PATH. On Windows, if it isn't there, use the highest-versioned `C:/Program Files/R/R-*/bin/Rscript.exe`. Confirm that `targets`, `tarchetypes`, `callr` and `jsonlite` load. If R or any of these is missing, name what's missing and continue **unchecked**: steps 4 and 6 and the graph are skipped, and the report's status is "not checked".
-2. **Get the Script Sequence.** Take the files and their order exactly as the user lists them. If the user hasn't listed them, ask. Never infer membership or order from file names or a `run_all.R`. The **project** folder is the user's working directory when the Source Scripts are inside it; otherwise it's the folder holding them. The user can name another. Paths are relative to it.
-3. **Loose Script?** A Source Script is loose when the project folder isn't a project: it has none of `*.Rproj`, `.git/`, `renv.lock`, `.here`, `DESCRIPTION`, `_targets.R` or `R/`, and it's a catch-all folder (Downloads, Desktop, Documents, the home folder, a temp folder) or most of its files have nothing to do with the scripts. Then, without asking:
+1. **Get the Script Sequence.** Take the files and their order exactly as the user lists them. If the user hasn't listed them, ask. Never infer membership or order from file names or a `run_all.R`. The **project** folder is the user's working directory when the Source Scripts are inside it; otherwise it's the folder holding them. The user can name another. Paths are relative to it.
+2. **Loose Script?** A Source Script is loose when the project folder isn't a project: it has none of `*.Rproj`, `.git/`, `renv.lock`, `.here`, `DESCRIPTION`, `_targets.R` or `R/`, and it's a catch-all folder (Downloads, Desktop, Documents, the home folder, a temp folder) or most of its files have nothing to do with the scripts. Then, without asking:
    - create a **Working Folder** next to the scripts, named after the first Source Script (`07-dois-modelos.R` gives `07-dois-modelos/`; if that name is taken, `07-dois-modelos_targetfy/`), and copy the Source Scripts into it. It becomes the project folder.
    - In section 2 (Read), once you know which files the scripts read, copy those too, at the same relative paths. A file that doesn't exist stays missing, and the check will report it.
    - Tell the user in one line, calmly: "`07-dois-modelos.R` is a loose file in Downloads, so I'm working in a new folder, `Downloads/07-dois-modelos/`, with a copy of it. Your original file isn't touched, and nothing else in Downloads is read or run."
    - Never mention the size or number of the folder's other files: they're out of scope, and naming them makes it sound as if they'll be loaded.
-4. **Accept only `.R` files.** Stop with a clear message for:
+3. **Accept only `.R` files.** Stop with a clear message for:
    - `.Rmd`, `.qmd`, `.ipynb`: planned, not yet supported.
    - `.Rnw`, files inside an R package (a `DESCRIPTION` file next to `R/`), Shiny apps: these aren't linear analyses.
+4. **Choose the R installation.** People often have several R versions installed, with packages spread across them, and the `Rscript` on the PATH isn't always the one they use. Start any `Rscript`: the one on the PATH, or on Windows any `C:/Program Files/R/R-*/bin/Rscript.exe`. Then run:
+
+   ```
+   Rscript <skill folder>/scripts/find-r.R --project <project> --scripts a.R,b.R --out <temp folder>/r.json
+   ```
+
+   It finds every R installation and, in a fresh session of each, loads targetfy's packages (`targets`, `tarchetypes`, `callr`, `jsonlite`) and every package the scripts need: `library()`, `require()`, `pkg::fn`, `set_engine("<pkg>")`. It reads the scripts without running them. Loading the packages, rather than only checking that they're installed, catches version conflicts such as `namespace 'yardstick' 1.3.1 is being loaded, but >= 1.4.0 is required`. In `r.json`:
+   - `chosen` is the `Rscript` to use for every later step: the check, the graph and anything else you run. It's the installation where everything loads, preferring the one on the PATH, then the highest version.
+   - If `chosen` isn't on the PATH (`chosen_is_path: false`), tell the user in one line: "I'm using R 4.5.1, since it's the one where all the packages your script needs load; the `Rscript` on your PATH (R 4.4.1) is missing `vip`."
+   - When `status` is `missing_packages`, no installation loads everything. `chosen` has the fewest problems. Show the user, for each installation, what's missing or fails to load, so they can choose where to install. Carry on with `chosen`. Its missing packages limit the check, which then falls back to the Static Check.
+   - When `status` is `no_r`, or `chosen` can't load targetfy's own packages, name what's missing and continue **unchecked**: sections 4 and 6 and the graph are skipped, and the report's status is "not checked".
+   - If no `Rscript` starts at all, the same applies: continue unchecked.
 5. **Choose the Generated File names.**
 
    | | `_targets.R` absent | `_targets.R` exists |
@@ -38,9 +49,9 @@ Turn a **Script Sequence** (one or more `.R` files, listed by the user, in run o
    - If the chosen Step Map or Conversion Report already exists, it's an earlier targetfy run. Ask before replacing those files.
    - Functions go in `R/` if it's absent or empty, otherwise in `R_targets/`. Tell the user which one.
 
-Done when you know whether R and its packages are available, the Script Sequence is fixed, and every Generated File name is chosen.
+Done when the R installation is chosen (or you know none can run the check), the Script Sequence is fixed, and every Generated File name is chosen.
 
-Convert every Script Sequence that passes preflight, however small or simple. The only stops are an unsupported file type (step 4) and the user declining a question. A three-line script still gets its Pipeline. If the Pipeline gains little, say so in the report's summary and convert anyway.
+Convert every Script Sequence that passes preflight, however small or simple. The only stops are an unsupported file type (step 3) and the user declining a question. A three-line script still gets its Pipeline. If the Pipeline gains little, say so in the report's summary and convert anyway.
 
 ## 2. Read
 
@@ -56,7 +67,7 @@ Read `references/conversion.md` now. It defines Steps and the code rules.
 
 If there are Unresolved Objects, resolve each one with `references/unresolved-objects.md` before writing anything.
 
-For a Loose Script, copy the input files into the Working Folder now (step 1.3).
+For a Loose Script, copy the input files into the Working Folder now (step 1.2).
 
 Done when every name the scripts use is accounted for: defined in the scripts, resolved with the user, or assumed to exist and flagged.
 
@@ -76,7 +87,7 @@ Ask the user which check to run, unless they've already said. The matching test 
 Mention what you already know will limit the run, such as a package the scripts attach that isn't installed. Never mention the size of files the scripts don't use.
 
 ```
-Rscript <skill folder>/scripts/check.R --project <project> --scripts a.R,b.R \
+<chosen Rscript> <skill folder>/scripts/check.R --project <project> --scripts a.R,b.R \
         [--pipeline targets_<name>.R] [--mode static] [--allow-large] \
         --out <temp folder>/result.json
 ```
@@ -95,7 +106,7 @@ Write the Conversion Report following `references/report.md`, and give the user 
 Then show the Pipeline's graph, whatever the check's status:
 
 ```
-Rscript <skill folder>/scripts/glimpse.R --project <project> --pipeline <Pipeline script>
+<chosen Rscript> <skill folder>/scripts/glimpse.R --project <project> --pipeline <Pipeline script>
 ```
 
 It saves `targets::tar_glimpse()` as an HTML page in the system temp folder, opens it in the browser and prints its path. Give the user that path. If it can't draw the graph (for example `visNetwork`, or a package the Pipeline attaches, isn't installed), mention it in one line and carry on.

@@ -162,7 +162,15 @@ static_check <- function(wd, pipeline = "_targets.R") {
   out
 }
 
+# Engines fitted by base R, and engines whose package has another name.
+BASE_ENGINES <- c("lm", "glm", "nls", "")
+ENGINE_PACKAGES <- list(stan = "rstanarm", spark = "sparklyr",
+                        lightgbm = c("lightgbm", "bonsai"),
+                        partykit = "partykit", h2o = c("h2o", "agua"),
+                        keras = "keras", brulee = "brulee")
+
 # Packages the code needs: library()/require()/requireNamespace() calls,
+# set_engine("<pkg>"),
 # pkg::fn, and tar_option_set(packages = ...). Read from the code, not run.
 required_packages <- function(paths) {
   pkgs <- character()
@@ -183,6 +191,14 @@ required_packages <- function(paths) {
       arg <- e[[2]]
       if (is.character(arg) || (is.symbol(arg) && !char_only))
         pkgs <<- c(pkgs, as.character(arg))
+    }
+    # parsnip engines name the package that fits the model:
+    # set_engine("glmnet") needs glmnet.
+    if (fname == "set_engine" && length(e) > 1) {
+      engine <- if (is.character(e[[2]])) e[[2]]
+        else if (length(e) > 2 && is.character(e[[3]])) e[[3]]
+      engine <- ENGINE_PACKAGES[[engine %||% ""]] %||% engine
+      if (length(engine)) pkgs <<- c(pkgs, engine[!engine %in% BASE_ENGINES])
     }
     if (fname == "tar_option_set" && !is.null(e$packages)) {
       val <- tryCatch(eval(e$packages, baseenv()), error = function(err) NULL)

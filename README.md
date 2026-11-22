@@ -20,6 +20,7 @@ Requires R >= 4.1 with `targets` (>= 1.12), `tarchetypes`, `callr` and `jsonlite
 |---|---|
 | `SKILL.md`, `references/` | the skill |
 | `scripts/check.R` | the check that accepts or rejects a Conversion |
+| `scripts/find-r.R` | picks the R installation where targetfy's and the scripts' packages all load |
 | `vendor/targets-r-skill/` | pinned copy of [targets-r-skill](https://github.com/statzhero/targets-r-skill) by Ulrich Atz, used as the house style |
 | `GLOSSARY.md`, `docs/` | vocabulary, design and decisions |
 | `tests/` | the check's tests: `Rscript -e 'testthat::test_dir("tests/testthat")'` |

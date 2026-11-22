@@ -100,6 +100,15 @@ Rscript scripts/check.R --project DIR --scripts a.R[,b.R] [--pipeline targets_<n
 - **Comparison**: before comparing, a model's stored `call`, environments and formula environments are removed. These always differ once code is wrapped in functions.
 - **Reseed rebuild**: the Target is rebuilt in a separate store, with the seed set *before* the Targets are defined. targets fixes each Target's seed when it is defined.
 
+### Choosing R (`scripts/find-r.R`)
+
+People often have several R versions installed, with packages spread across them, and the `Rscript` on the PATH isn't always the one they use: a real run hit an outdated `yardstick` in the PATH's R 4.4.1 after the user had updated it in R 4.5.1.
+
+- In preflight, `find-r.R` lists every installation (the PATH, `C:/Program Files/R/R-*`, `%LOCALAPPDATA%/Programs/R`, macOS frameworks, `/opt/R/*`, `/usr/lib/R`) and loads, in a fresh session of each, targetfy's packages and every package the scripts need (`library()`, `require()`, `pkg::fn`, `set_engine("<pkg>")`), read from the code without running it. Loading rather than looking for the folder catches dependency version conflicts.
+- It picks the installation where everything loads, preferring the PATH, then the highest version. If none qualifies, it picks the one with the fewest problems and lists, per installation, what's missing, so the user chooses where to install.
+- R sets `R_HOME`, `R_LIBS_USER` and `R_LIBS_SITE` for itself and a child process inherits them, which would make another version load this version's library. The probe clears the ones R set and keeps any the user set.
+- The chosen `Rscript` runs the check and the graph, and the report names it.
+
 ### Graph (`scripts/glimpse.R`)
 
 After the report, and again after the wizard if any Enhancement was kept, the skill shows `targets::tar_glimpse(script = <Pipeline script>)`. The page is saved to the system temp folder (never the project, and not R's session temp folder, which R deletes on exit before the browser loads the page) and opened in the browser. `tar_glimpse()` only reads the Pipeline script; it builds nothing.

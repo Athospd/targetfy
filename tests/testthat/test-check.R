@@ -165,3 +165,13 @@ test_that("required packages are read from library, :: and tar_option_set", {
   expect_equal(check_env$required_packages(f),
                c("dplyr", "fs", "purrr", "readr", "targets", "tidyr"))
 })
+
+test_that("parsnip engines count as required packages", {
+  f <- tempfile(fileext = ".R")
+  writeLines(c("m <- logistic_reg() %>% set_engine('glmnet')",
+               "t <- set_engine(decision_tree(), 'rpart')",
+               "l <- linear_reg() %>% set_engine('lm')",
+               "b <- boost_tree() %>% set_engine('lightgbm')"), f)
+  expect_equal(check_env$required_packages(f),
+               c("bonsai", "glmnet", "lightgbm", "rpart"))
+})
