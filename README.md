@@ -7,7 +7,7 @@ It never changes your files. It writes `_targets.R` (or `targets_<name>.R` when 
 ## Install
 
 ```sh
-git clone <this repo> ~/.claude/skills/targetfy
+git clone https://github.com/Athospd/targetfy.git ~/.claude/skills/targetfy
 ```
 
 Then, in Claude Code: `/targetfy`, or ask it to convert your R script(s) to targets.
