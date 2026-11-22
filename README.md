@@ -4,6 +4,8 @@ A Claude Code skill that turns existing R scripts into an equivalent [`{targets}
 
 It never changes your files. It writes `_targets.R` (or `targets_<name>.R` when `_targets.R` already exists), a functions folder, a Step Map and a Conversion Report next to your scripts. A script sitting loose in Downloads or Desktop gets its own new folder, with a copy of the script and only the files it reads. A bundled R check then runs your scripts and the new Pipeline in throwaway copies and compares their results before the Conversion is accepted.
 
+[![Watch the 34-second walkthrough: a real targetfy run, from the R script to the Pipeline, its DAG and the report](demo/walkthrough/thumbnail.png)](https://github.com/Athospd/targetfy/releases/download/v1.0.0/targetfy-walkthrough.mp4)
+
 ## Install
 
 ```sh
