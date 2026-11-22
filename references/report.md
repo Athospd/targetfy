@@ -5,10 +5,10 @@ Write it for the user. Every section is required; write "None" for an empty one.
 ```markdown
 # targetfy Conversion Report
 
-**Status:** equivalent | not equivalent | Equivalence unverified (static check only) | Equivalence unverified (the scripts failed to run) | not checked (R or packages missing)
-**Script Sequence:** 1. `01_load.R`  2. `02_model.R`
-**Checked:** 2026-11-21, 3 check runs
-**R:** 4.4.1 (`C:/Program Files/R/R-4.4.1/bin/x64/Rscript.exe`, chosen by `find-r.R`; say why when it isn't the one on the PATH)
+- **Status:** equivalent | not equivalent | Equivalence unverified (static check only) | Equivalence unverified (the scripts failed to run) | not checked (R or packages missing)
+- **Script Sequence:** 1. `01_load.R`  2. `02_model.R`
+- **Checked:** 2026-11-21, 3 check runs
+- **R:** 4.4.1 (`C:/Program Files/R/R-4.4.1/bin/x64/Rscript.exe`, chosen by `find-r.R`; say why when it isn't the one on the PATH)
 
 ## Why it wasn't verified
 Only when the status isn't "equivalent" or "not equivalent". For example: `analysis.R` failed to run at line 12: `could not find function "lgb.train"`. The comparison couldn't run, so the Pipeline was generated anyway and passed the Static Check. Or: R / the `targets` package isn't installed, so no check ran. Or: `notapkg` isn't installed, so the check returned `not_checked`; list every entry of `missing_packages`. Say what to install or fix to get it verified.

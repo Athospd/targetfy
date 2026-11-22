@@ -1,0 +1,11 @@
+{
+  "targets": {
+    "sales": "sales",
+    "by_region": "by_region",
+    "model": "model",
+    "coefs": "coefs",
+    "revenue_plot": "plot"
+  },
+  "handoff_files": [],
+  "stochastic": []
+}

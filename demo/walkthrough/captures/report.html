@@ -1,0 +1,149 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+
+body{background:#0f1520;color:#e6edf6;font-family:"Segoe UI",sans-serif;font-size:22px;
+     line-height:1.55;margin:0;padding:48px 72px;width:1456px}
+h1{font-size:44px;margin:0 0 18px;border-bottom:1px solid #2a3650;padding-bottom:12px}
+h2{font-size:30px;margin:34px 0 12px;color:#3cc8b4;border-bottom:1px solid #222c40;padding-bottom:6px}
+code{font-family:"Cascadia Mono",Consolas,monospace;background:#1b2436;padding:2px 7px;
+     border-radius:6px;font-size:19px}
+table{border-collapse:collapse;width:100%;margin:8px 0}
+th,td{border:1px solid #2a3650;padding:7px 12px;text-align:left}
+th{background:#1b2436}
+tr:nth-child(even) td{background:#131b29}
+strong{color:#ffffff}
+ul{padding-left:26px;margin:6px 0 4px}
+li{margin:2px 0}
+</style></head><body>
+<h1>targetfy Conversion Report</h1>
+<ul>
+<li><strong>Status:</strong> equivalent</li>
+<li><strong>Script Sequence:</strong> 1. <code>analysis.R</code></li>
+<li><strong>Checked:</strong> 2026-11-22, 1 check run</li>
+<li><strong>R:</strong> 4.4.1 (<code>C:/Program Files/R/R-4.4.1/bin/x64/Rscript.exe</code>, the one on the PATH)</li>
+</ul>
+<h2>Targets</h2>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Step (script variable)</th>
+<th>Check</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>sales_raw_file</td>
+<td>—</td>
+<td>not compared</td>
+<td>tracks <code>data/sales.csv</code></td>
+</tr>
+<tr>
+<td>sales_raw</td>
+<td>—</td>
+<td>not compared</td>
+<td>the raw read; the script overwrites <code>sales</code></td>
+</tr>
+<tr>
+<td>sales</td>
+<td><code>sales</code></td>
+<td>match</td>
+<td>filtered to 2021+, revenue in thousands</td>
+</tr>
+<tr>
+<td>by_region</td>
+<td><code>by_region</code></td>
+<td>match</td>
+<td></td>
+</tr>
+<tr>
+<td>model</td>
+<td><code>model</code></td>
+<td>match</td>
+<td></td>
+</tr>
+<tr>
+<td>coefs</td>
+<td><code>coefs</code></td>
+<td>match</td>
+<td></td>
+</tr>
+<tr>
+<td>revenue_plot</td>
+<td><code>plot</code></td>
+<td>match</td>
+<td></td>
+</tr>
+<tr>
+<td>revenue_png</td>
+<td>—</td>
+<td>not compared</td>
+<td>writes <code>out/revenue.png</code></td>
+</tr>
+<tr>
+<td>coefs_csv</td>
+<td>—</td>
+<td>not compared</td>
+<td>writes <code>out/coefs.csv</code></td>
+</tr>
+</tbody>
+</table>
+<h2>Files written by the scripts</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Check</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>out/coefs.csv</td>
+<td>match</td>
+<td></td>
+</tr>
+<tr>
+<td>out/revenue.png</td>
+<td>match</td>
+<td>byte-identical</td>
+</tr>
+</tbody>
+</table>
+<h2>Lines left out</h2>
+<table>
+<thead>
+<tr>
+<th>File:line</th>
+<th>Code</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>analysis.R:6</td>
+<td><code>setwd(&quot;~/projects/sales&quot;)</code></td>
+<td>ties the script to one machine; targets runs from the project folder</td>
+</tr>
+<tr>
+<td>analysis.R:7</td>
+<td><code>dir.create(&quot;out&quot;, showWarnings = FALSE)</code></td>
+<td>the file Targets create their own folder</td>
+</tr>
+<tr>
+<td>analysis.R:15</td>
+<td><code>head(sales)</code></td>
+<td>console output only</td>
+</tr>
+</tbody>
+</table>
+<h2>Unresolved Objects</h2>
+<p>None.</p>
+<h2>Still failing</h2>
+<p>None.</p>
+<h2>Enhancements</h2>
+<p>None offered: the data is small and there are no loops to branch over.</p>
+<h2>Run it</h2>
+<p><code>targets::tar_make()</code> builds the Pipeline; <code>targets::tar_visnetwork()</code> shows the graph.</p>
+
+</body></html>
