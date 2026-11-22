@@ -8,18 +8,23 @@ allowed-tools: Read, Grep, Glob, Write, Edit, Bash
 
 Turn a **Script Sequence** (one or more `.R` files, listed by the user, in run order) into a `{targets}` **Pipeline** that is **Equivalent** to it: it produces the same final objects and written files. Terms are defined in `GLOSSARY.md` in this skill's folder. The bundled R check (`scripts/check.R`) decides whether a Conversion is accepted; your own judgement about Equivalence never replaces it.
 
-**Hard guardrail:** write only Generated Files: the Pipeline script, the functions folder, the Step Map and the Conversion Report, under the names chosen in preflight. Leave every existing file exactly as it is: Source Scripts, sourced helpers, data, `.Rprofile`, `renv.lock`. Use Edit only on Generated Files. Install nothing: when a package is missing, name it for the user and carry on.
+**Hard guardrail:** write only Generated Files: the Pipeline script, the functions folder, the Step Map and the Conversion Report, under the names chosen in preflight, plus the Working Folder for a Loose Script (step 1.3). Leave every existing file exactly as it is: Source Scripts, sourced helpers, data, `.Rprofile`, `renv.lock`. Use Edit only on Generated Files. Install nothing: when a package is missing, name it for the user and carry on.
 
 **Keep going.** Once preflight has fixed the Script Sequence and the names, targetfy always writes the Generated Files and the report. Anything that blocks verification (R or a package missing, scripts that fail to run) lowers how much gets checked, and the report and chat say exactly what was skipped and why. It never stops the Conversion.
 
 ## 1. Preflight
 
 1. **Find R.** Use `Rscript` on the PATH. On Windows, if it isn't there, use the highest-versioned `C:/Program Files/R/R-*/bin/Rscript.exe`. Confirm that `targets`, `tarchetypes`, `callr` and `jsonlite` load. If R or any of these is missing, name what's missing and continue **unchecked**: steps 4 and 6 and the graph are skipped, and the report's status is "not checked".
-2. **Get the Script Sequence.** Take the files and their order exactly as the user lists them. If the user hasn't listed them, ask. Never infer membership or order from file names or a `run_all.R`. The **project** folder is the user's working directory, unless they name another. Paths are relative to it.
-3. **Accept only `.R` files.** Stop with a clear message for:
+2. **Get the Script Sequence.** Take the files and their order exactly as the user lists them. If the user hasn't listed them, ask. Never infer membership or order from file names or a `run_all.R`. The **project** folder is the user's working directory when the Source Scripts are inside it; otherwise it's the folder holding them. The user can name another. Paths are relative to it.
+3. **Loose Script?** A Source Script is loose when the project folder isn't a project: it has none of `*.Rproj`, `.git/`, `renv.lock`, `.here`, `DESCRIPTION`, `_targets.R` or `R/`, and it's a catch-all folder (Downloads, Desktop, Documents, the home folder, a temp folder) or most of its files have nothing to do with the scripts. Then, without asking:
+   - create a **Working Folder** next to the scripts, named after the first Source Script (`07-dois-modelos.R` gives `07-dois-modelos/`; if that name is taken, `07-dois-modelos_targetfy/`), and copy the Source Scripts into it. It becomes the project folder.
+   - In section 2 (Read), once you know which files the scripts read, copy those too, at the same relative paths. A file that doesn't exist stays missing, and the check will report it.
+   - Tell the user in one line, calmly: "`07-dois-modelos.R` is a loose file in Downloads, so I'm working in a new folder, `Downloads/07-dois-modelos/`, with a copy of it. Your original file isn't touched, and nothing else in Downloads is read or run."
+   - Never mention the size or number of the folder's other files: they're out of scope, and naming them makes it sound as if they'll be loaded.
+4. **Accept only `.R` files.** Stop with a clear message for:
    - `.Rmd`, `.qmd`, `.ipynb`: planned, not yet supported.
    - `.Rnw`, files inside an R package (a `DESCRIPTION` file next to `R/`), Shiny apps: these aren't linear analyses.
-4. **Choose the Generated File names.**
+5. **Choose the Generated File names.**
 
    | | `_targets.R` absent | `_targets.R` exists |
    |---|---|---|
@@ -35,7 +40,7 @@ Turn a **Script Sequence** (one or more `.R` files, listed by the user, in run o
 
 Done when you know whether R and its packages are available, the Script Sequence is fixed, and every Generated File name is chosen.
 
-Convert every Script Sequence that passes preflight, however small or simple. The only stops are an unsupported file type (step 3) and the user declining a question. A three-line script still gets its Pipeline. If the Pipeline gains little, say so in the report's summary and convert anyway.
+Convert every Script Sequence that passes preflight, however small or simple. The only stops are an unsupported file type (step 4) and the user declining a question. A three-line script still gets its Pipeline. If the Pipeline gains little, say so in the report's summary and convert anyway.
 
 ## 2. Read
 
@@ -51,6 +56,8 @@ Read `references/conversion.md` now. It defines Steps and the code rules.
 
 If there are Unresolved Objects, resolve each one with `references/unresolved-objects.md` before writing anything.
 
+For a Loose Script, copy the input files into the Working Folder now (step 1.3).
+
 Done when every name the scripts use is accounted for: defined in the scripts, resolved with the user, or assumed to exist and flagged.
 
 ## 3. Write the Generated Files
@@ -62,9 +69,11 @@ Following `references/conversion.md`, write:
 
 ## 4. Check
 
-Decide the mode:
-- **Equivalence** (the default): it runs the Script Sequence and the Pipeline in throwaway copies. Ask first, offering Static instead, if the scripts reach external systems (databases, APIs, credentials) or the user has said they're slow.
-- **Static**: only validates the Generated Files, and the report says Equivalence is unverified.
+Ask the user which check to run, unless they've already said. The matching test runs their code, so it's their call. Explain what each one does in plain words:
+- **Run and compare** (the Equivalence Check): runs the scripts and the Pipeline in a throwaway copy of the project folder, compares their results, then deletes the copy. Nothing in the user's own folder is run or changed. Mark it recommended, unless the scripts reach external systems (databases, APIs, credentials, sending email) or the user has said they're slow: then recommend the other option and say why.
+- **Only validate the files** (the Static Check): checks that the Generated Files parse and form a valid Pipeline, and runs none of the user's code. The report says Equivalence is unverified.
+
+Mention what you already know will limit the run, such as a package the scripts attach that isn't installed. Never mention the size of files the scripts don't use.
 
 ```
 Rscript <skill folder>/scripts/check.R --project <project> --scripts a.R,b.R \

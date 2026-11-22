@@ -12,7 +12,7 @@ A **Claude Code skill** (`/targetfy`) that turns a **Script Sequence** (one or m
 
 ## Hard rules
 
-1. **targetfy never modifies any existing file.** It only writes Generated Files: the Pipeline script, `R_targets/` (or `R/`), the Conversion Report and the Step Map.
+1. **targetfy never modifies any existing file.** It only writes Generated Files: the Pipeline script, `R_targets/` (or `R/`), the Conversion Report and the Step Map, plus a Working Folder for a Loose Script (see below).
 2. An existing `_targets.R` never blocks a Conversion. targetfy writes `targets_<name>.R` instead, with its own store `_targets_<name>/`, Step Map `targetfy-map_<name>.json` and report `targetfy-report_<name>.md`, and tells the user. `<name>` is the name of the first Source Script in the Script Sequence. If `R/` already contains files, functions go in `R_targets/`.
 3. It never installs packages. If `renv.lock` exists, the check runs under it.
 4. It never guesses which files belong to the analysis. The user lists the Script Sequence, and the order given is the order the scripts run.
@@ -23,6 +23,14 @@ A **Claude Code skill** (`/targetfy`) that turns a **Script Sequence** (one or m
    - A package the Pipeline needs isn't installed, so even the Static Check can't run → status `not_checked` (exit 0) with `missing_packages`; the Generated Files are not "fixed" for it.
    - An Unresolved Object found nowhere → assumed to exist and flagged, without asking.
    The only stops are an unsupported file type and the user declining a question.
+
+## Loose Scripts
+
+People try targetfy on a single file sitting in Downloads or Desktop, among unrelated files, where the code is also more likely not to run. Working in that folder would put Generated Files among personal files, and the Equivalence Check would copy the whole folder.
+
+- A Source Script is a **Loose Script** when its folder has no project marker (`*.Rproj`, `.git/`, `renv.lock`, `.here`, `DESCRIPTION`, `_targets.R`, `R/`) and is a catch-all folder or mostly holds unrelated files.
+- targetfy then creates a **Working Folder** next to it, named after the first Source Script, with copies of the Source Scripts and of the files they read, at the same relative paths. It says so in one line and doesn't ask: nothing existing is touched, and the copy is small.
+- It never mentions the size or number of the unrelated files: they're out of scope, and naming them suggests they'll be loaded or run.
 
 ## Conversion
 
@@ -57,6 +65,7 @@ Ordering problems (a later script defines something an earlier one needs) are fl
 
 ## Verification
 
+- **The user chooses the check.** Before the check, targetfy asks whether to run the matching test (the Equivalence Check: run both, compare) or only validate the files (the Static Check, which runs none of the user's code). It recommends the Equivalence Check unless the scripts reach external systems or are known to be slow.
 - **Equivalence Check**: run the Script Sequence and the Pipeline in a temporary copy of the project, compare, then delete the copy.
   - The copy contains the code plus every file the scripts read, at the same relative paths. Files are copied, not symlinked (Windows often blocks symlinks).
   - If the copy would exceed about 1 GB, targetfy asks first. The user can copy anyway or fall back to the Static Check.

@@ -18,6 +18,14 @@ _Avoid_: project, script set, run order
 A file that one Source Script writes only so a later Source Script in the same Sequence can read it back; in a Conversion it becomes a direct dependency between Targets.
 _Avoid_: temp file, intermediate file
 
+**Loose Script**:
+A Source Script that sits in a folder that isn't a project (no `.Rproj`, `.git`, `renv.lock`, `DESCRIPTION` or `R/`), typically Downloads or Desktop, among files unrelated to it. targetfy converts it in a Working Folder.
+_Avoid_: orphan script, stray file
+
+**Working Folder**:
+The folder targetfy creates next to a Loose Script, named after it, holding copies of the Source Scripts and the files they read; it becomes the project, and the original files are never touched.
+_Avoid_: sandbox, workspace
+
 **Unresolved Object**:
 A name the Script Sequence uses but never defines, loads or imports.
 _Avoid_: missing variable, undefined symbol
@@ -61,7 +69,7 @@ An optional, follow-up pass over an existing Pipeline that adds a `{targets}` fe
 _Avoid_: optimization, upgrade
 
 **Generated Files**:
-The new files targetfy writes next to the Source Script (the Pipeline, its functions, the Conversion Report and the Step Map); targetfy never modifies any existing file.
+The new files targetfy writes next to the Source Script (the Pipeline, its functions, the Conversion Report and the Step Map, plus the Working Folder for a Loose Script); targetfy never modifies any existing file.
 _Avoid_: output, artifacts
 
 ### Output (borrowed from `{targets}`)
