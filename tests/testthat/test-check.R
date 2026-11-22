@@ -227,7 +227,9 @@ test_that("independent loops, applies and global state are told apart", {
   expect_equal(as.character(unlist(branch[[1]]$collects)), "fits")
   expect_equal(finding(scan, "carried_loop")[[1]]$where, "s.R:7")
   flags <- vapply(finding(scan, "global_state"), function(f) f$flag, "")
-  expect_true(all(c("options", "set.seed", "global_assign") %in% flags))
+  expect_true("global_assign" %in% flags)
+  setups <- vapply(finding(scan, "pipeline_setup"), function(f) f$setup, "")
+  expect_true(all(c("global_options", "seed") %in% setups))
   expect_equal(finding(scan, "defined_later")[[1]]$name, "later")
   re <- finding(scan, "reassigned")
   expect_equal(re[[1]]$name, "x")
@@ -346,4 +348,69 @@ test_that("the render Enhancement builds the document from the Pipeline", {
   expect_equal(target_result(res, "total")$result, "match")
   expect_equal(target_result(res, "report_html")$result, "not_compared")
   expect_length(res$outdated_after_build, 0)
+})
+
+# --- v2: Pipeline setup (tar_source(), tar_option_set()) -----------------------
+
+setup_dir <- file.path(fixtures, "setup", "project")
+
+setup_finding <- function(scan, setup) {
+  Filter(function(f) identical(f$setup, setup), scan$findings)
+}
+
+test_that("the scan finds what belongs in tar_source() and tar_option_set()", {
+  scan <- check_env$flow_scan(setup_dir, "analysis.R")
+  src <- finding(scan, "sourced_file")[[1]]
+  expect_equal(src$path, "helpers.R")
+  expect_true(src$functions_only)
+  expect_equal(as.character(unlist(src$functions)), "summarise_groups")
+  folder <- finding(scan, "sourced_folder")[[1]]
+  expect_equal(folder$path, "utils")
+  expect_length(unlist(folder$files_with_work), 0)
+  expect_length(finding(scan, "branch_candidate"), 0)
+  expect_equal(finding(scan, "script_function")[[1]]$name, "scale01")
+  expect_match(setup_finding(scan, "global_options")[[1]]$code, "contrasts")
+  expect_equal(setup_finding(scan, "seed")[[1]]$suggest, "tar_option_set(seed = 42)")
+  expect_length(setup_finding(scan, "memory"), 2)
+  expect_equal(setup_finding(scan, "tolerated_error")[[1]]$where, "analysis.R:22")
+})
+
+test_that("sourced files with work, library setup and load_all are told apart", {
+  dir <- tempfile(); dir.create(dir)
+  writeLines(c("helper <- function(x) x", "cfg <- read.csv('cfg.csv')"),
+             file.path(dir, "setup.R"))
+  writeLines(c("source('setup.R')", ".libPaths('C:/lib')", "renv::activate()",
+               "source('renv/activate.R')", "pkgload::load_all('mypkg')"),
+             file.path(dir, "s.R"))
+  scan <- check_env$flow_scan(dir, "s.R")
+  src <- finding(scan, "sourced_file")[[1]]
+  expect_false(src$functions_only)
+  expect_equal(as.numeric(unlist(src$work_lines)), 2)
+  expect_match(src$message, "setup_functions.R")
+  expect_length(setup_finding(scan, "environment_setup"), 3)
+  expect_equal(setup_finding(scan, "dev_package")[[1]]$path, "mypkg")
+})
+
+test_that("options kept in the Pipeline script or a hook keep it equivalent", {
+  res <- run_pipeline("setup", "analysis.R", "_targets.R")
+  expect_equal(res$status, "equivalent")
+  d <- target_result(res, "d")
+  expect_true(d$stochastic)
+  expect_equal(d$result, "match")   # set.seed() moved into the function
+  expect_equal(res$tolerated_errors[[1]]$target, "extra")
+  expect_length(res$outdated_after_build, 0)
+  expect_equal(run_pipeline("setup", "analysis.R", "targets_hook.R")$status, "equivalent")
+})
+
+test_that("dropping options() the script relies on is caught", {
+  res <- run_pipeline("setup", "analysis.R", "targets_nooptions.R")
+  expect_equal(res$status, "not_equivalent")
+  expect_equal(target_result(res, "coefs")$result, "mismatch")
+})
+
+test_that("a load_all() package with imports = is equivalent", {
+  skip_if_not_installed("pkgload")
+  res <- run_fixture("devpkg", "script.R")
+  expect_equal(res$status, "equivalent")
+  expect_equal(target_result(res, "y")$result, "match")
 })

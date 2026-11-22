@@ -301,6 +301,7 @@ APPLY_FUNS <- c("lapply", "sapply", "vapply", "Map", "mapply", "map",
   "imap", "pmap", "map2", "walk", "future_map", "future_lapply", "parLapply",
   "mclapply", "group_map", "by", "tapply")
 CARRY_FUNS <- c("Reduce", "accumulate", "reduce")
+SETUP_FIELDS <- c("sourced", "list_dirs", "libraries", "global_code", "dev_paths")
 APPEND_FUNS <- c("c", "rbind", "cbind", "append", "bind_rows", "bind_cols",
                  "list", "rbindlist")
 
@@ -346,6 +347,11 @@ new_flow <- function() {
   st$reads <- character(); st$writes <- character(); st$files_read <- character()
   st$files_written <- character(); st$flags <- character(); st$assigns <- list()
   st$loops <- list(); st$applies <- character()
+  # What the Pipeline script's setup (tar_source(), tar_option_set(), code
+  # before the Targets) may need to take over from the script.
+  st$sourced <- character(); st$list_dirs <- character()
+  st$libraries <- character(); st$global_code <- character()
+  st$seed <- NULL; st$dev_paths <- character()
   st
 }
 
@@ -408,7 +414,7 @@ flow_walk <- function(e, st) {
       over = paste(deparse(e[[3]]), collapse = " "), body = body)
     st$writes <- c(st$writes, var, body$writes)
     st$reads <- c(st$reads, body$reads)
-    for (f in c("files_read", "files_written", "flags", "applies"))
+    for (f in c("files_read", "files_written", "flags", "applies", SETUP_FIELDS))
       st[[f]] <- c(st[[f]], body[[f]])
     return(invisible(st))
   }
@@ -416,7 +422,7 @@ flow_walk <- function(e, st) {
     body <- new_flow()
     walk_args(args, body)
     st$loops[[length(st$loops) + 1]] <- list(kind = fname, var = NA, over = NA, body = body)
-    for (f in c("reads", "writes", "files_read", "files_written", "flags", "applies"))
+    for (f in c("reads", "writes", "files_read", "files_written", "flags", "applies", SETUP_FIELDS))
       st[[f]] <- c(st[[f]], body[[f]])
     return(invisible(st))
   }
@@ -436,6 +442,37 @@ flow_walk <- function(e, st) {
   }
   if (fname %in% c("options", "Sys.setenv", "set.seed", "attach", "Sys.setlocale"))
     st$flags <- c(st$flags, fname)
+  if (fname %in% c("options", "Sys.setenv", "Sys.setlocale"))
+    st$global_code <- c(st$global_code, paste(deparse(e), collapse = " "))
+  if (fname == "set.seed" && length(args) && is.numeric(args[[1]]))
+    st$seed <- args[[1]]
+  if (fname %in% c("source", "sys.source") && length(args)) {
+    p <- literal_path(args[[1]])
+    if (is.null(p)) st$flags <- c(st$flags, "source_dynamic")
+    else if (grepl("renv/activate\\.R$", p)) st$flags <- c(st$flags, "env_setup")
+    else st$sourced <- c(st$sourced, p)
+  }
+  if (fname %in% c("list.files", "dir", "dir_ls") && length(args)) {
+    p <- file_arg(e, 1)
+    if (!is.null(p)) st$list_dirs <- c(st$list_dirs, p)
+  }
+  if (fname == "gc" || (fname == "rm" && !"list" %in% names(args)))
+    st$flags <- c(st$flags, "memory")
+  if (fname == "load_all") {
+    st$flags <- c(st$flags, "load_all")
+    st$dev_paths <- c(st$dev_paths, if (length(args)) literal_path(args[[1]]) %||% "?" else ".")
+  }
+  if (fname == ".libPaths" && length(args) ||
+      fname %in% c("activate", "load", "use") && is.call(e[[1]]) &&
+        identical(e[[1]][[2]], quote(renv)))
+    st$flags <- c(st$flags, "env_setup")
+  if (fname %in% c("library", "require") && length(args)) {
+    char_only <- isTRUE(tryCatch(eval(e$character.only, baseenv()),
+                                 error = function(err) FALSE))
+    a <- args[[1]]
+    if (is.character(a) || (is.symbol(a) && !char_only))
+      st$libraries <- c(st$libraries, as.character(a))
+  }
   if (fname %in% READ_FUNS) {
     p <- file_arg(e, 1)
     if (!is.null(p)) st$files_read <- c(st$files_read, p)
@@ -479,6 +516,169 @@ classify_loop <- function(loop, defined_before) {
        carried = carried, collects = unique(collects))
 }
 
+# A sourced file: which top-level statements define functions, which only
+# attach packages, and which do work (read data, compute, set options).
+classify_source_file <- function(path) {
+  exprs <- tryCatch(parse(path, keep.source = TRUE), error = function(e) e)
+  if (inherits(exprs, "error"))
+    return(list(exists = file.exists(path), functions = character(),
+                work_lines = integer(), parse_error = conditionMessage(exprs)))
+  refs <- attr(exprs, "srcref")
+  fun <- character(); work <- integer()
+  for (i in seq_along(exprs)) {
+    e <- exprs[[i]]
+    if (is_function_def(e)) fun <- c(fun, lhs_symbol(e[[2]]))
+    else if (is.call(e) && call_name(e) %in% c("library", "require",
+               "suppressPackageStartupMessages", "requireNamespace")) next
+    else work <- c(work, refs[[i]][[1]])
+  }
+  list(exists = TRUE, functions = fun, work_lines = work)
+}
+
+is_function_def <- function(e) {
+  is.call(e) && call_name(e) %in% c("<-", "=") && length(e) == 3 &&
+    is.call(e[[3]]) && identical(e[[3]][[1]], quote(`function`))
+}
+
+# Locally installed packages (no repository, no remote): probably in-house,
+# so worth `imports =`. Only packages installed in this R are looked at.
+is_local_package <- function(pkg) {
+  d <- tryCatch(suppressWarnings(utils::packageDescription(pkg)),
+                error = function(e) NA)
+  if (!is.list(d) || identical(d$Priority, "base") ||
+      identical(d$Priority, "recommended")) return(FALSE)
+  is.null(d$Repository) && is.null(d$RemoteType) && is.null(d$biocViews)
+}
+
+# What belongs in the Pipeline script's setup rather than in Targets:
+# functions to load (tar_source()), and options, seeds, memory settings,
+# error handling and package tracking (tar_option_set() and the code
+# before list()).
+setup_findings <- function(project, statements) {
+  out <- list()
+  add <- function(...) out[[length(out) + 1]] <<- list(...)
+  where <- function(i) statements[[i]]$where
+  for (i in seq_along(statements)) {
+    x <- statements[[i]]; st <- x$st; e <- x$expr
+    if (is_function_def(e)) {
+      name <- lhs_symbol(e[[2]])
+      add(kind = "script_function", name = name, where = where(i),
+          message = sprintf(paste0(
+            "`%s` is defined in the script at %s: copy it verbatim into the functions ",
+            "file, and have the Targets call it. targets tracks its body, so ",
+            "editing it reruns the Targets that use it."), name, where(i)))
+    }
+    for (p in unique(st$sourced)) {
+      rel <- if (x$base == ".") p else file.path(x$base, p)
+      info <- classify_source_file(file.path(project, rel))
+      only <- isTRUE(info$exists) && !length(info$work_lines) && is.null(info$parse_error)
+      add(kind = "sourced_file", path = rel, where = where(i),
+          functions = I(info$functions), work_lines = I(info$work_lines),
+          functions_only = only,
+          message = if (!isTRUE(info$exists)) sprintf(
+              "`%s` (sourced at %s) doesn't exist: an Unresolved Object for every name it would define.",
+              rel, where(i))
+            else if (only) sprintf(paste0(
+              "`%s` (sourced at %s) only defines functions (%s): load it where it is, with ",
+              "`tar_source(c(\"<functions folder>\", \"%s\"))`. Don't copy it."),
+              rel, where(i), paste0("`", info$functions, "`", collapse = ", "), rel)
+            else sprintf(paste0(
+              "`%s` (sourced at %s) also runs code (lines %s): convert it like a Source Script. ",
+              "Its functions go into `%s_functions.R` and its work becomes Targets. Don't ",
+              "`tar_source()` it: that would rerun its work every time the Pipeline is read."),
+              rel, where(i), paste(info$work_lines, collapse = ", "),
+              tools::file_path_sans_ext(basename(rel))))
+    }
+    sources_many <- length(st$list_dirs) &&
+      ("source" %in% st$reads || "source_dynamic" %in% st$flags)
+    for (d in if (sources_many) unique(st$list_dirs) else character()) {
+      rel <- if (x$base == ".") d else file.path(x$base, d)
+      files <- list.files(file.path(project, rel), pattern = "\\.[Rr]$")
+      infos <- lapply(file.path(project, rel, files), classify_source_file)
+      mixed <- files[!vapply(infos, function(f) !length(f$work_lines) &&
+                                is.null(f$parse_error), TRUE)]
+      add(kind = "sourced_folder", path = rel, where = where(i),
+          files = I(files), files_with_work = I(mixed),
+          message = if (!length(mixed)) sprintf(paste0(
+              "%s sources every file in `%s/`, and they only define functions: load the ",
+              "folder where it is, with `tar_source(c(\"<functions folder>\", \"%s\"))`."),
+              where(i), rel, rel)
+            else sprintf(paste0(
+              "%s sources every file in `%s/`; %s also run code: convert those like ",
+              "Source Scripts, and `tar_source()` the function-only files individually."),
+              where(i), rel, paste0("`", mixed, "`", collapse = ", ")))
+    }
+    for (code in unique(st$global_code))
+      add(kind = "pipeline_setup", setup = "global_options", where = where(i),
+          code = code, suggest = code,
+          message = sprintf(paste0(
+            "%s: `%s` changes how later code behaves. Put it in the Pipeline script, ",
+            "after `tar_option_set()` and before `list(...)`, so it holds while the Targets run. ",
+            "If the parallel-workers Enhancement is added, also run it on the workers with ",
+            "`tarchetypes::tar_hook_before(hook = %s)`."), where(i), code, code))
+    if ("set.seed" %in% st$flags) {
+      top <- is.call(e) && call_name(e) == "set.seed" && !is.null(st$seed)
+      add(kind = "pipeline_setup", setup = "seed", where = where(i),
+          seed = st$seed %||% NA,
+          suggest = if (top) sprintf("tar_option_set(seed = %s)", format(st$seed)) else NA,
+          message = if (top) sprintf(paste0(
+              "%s: `set.seed(%s)` fixes the script's random numbers. Set ",
+              "`tar_option_set(seed = %s)`: each Target then draws from its own fixed stream, ",
+              "so results are reproducible but differ from the script's (compared by structure). ",
+              "If it sits right before the only random Step, call it at the top of that Step's ",
+              "function instead, and the value matches exactly."),
+              where(i), format(st$seed), format(st$seed))
+            else sprintf(paste0(
+              "%s: sets the seed inside other code. Keep it in the same function as the ",
+              "random draws it governs."), where(i)))
+    }
+    if ("memory" %in% st$flags)
+      add(kind = "pipeline_setup", setup = "memory", where = where(i),
+          suggest = "tar_option_set(memory = \"transient\", garbage_collection = TRUE)",
+          message = sprintf(paste0(
+            "%s: `rm()`/`gc()` frees memory between Steps. Drop the line (list it under ",
+            "\"Lines left out\"), and set `tar_option_set(memory = \"transient\", ",
+            "garbage_collection = TRUE)` so targets unloads each value once it's stored."),
+            where(i)))
+    if (is.call(e) && call_name(e) %in% c("try", "tryCatch", "withCallingHandlers")) {
+      add(kind = "pipeline_setup", setup = "tolerated_error", where = where(i),
+          suggest = "tar_target(..., error = \"null\")",
+          message = sprintf(paste0(
+            "%s: `%s()` wraps the whole statement, so the script carries on when it fails. ",
+            "Keep the `%s()` inside the Step's function when it returns a fallback value. If the ",
+            "script simply continues without the result, give that Target `error = \"null\"`, ",
+            "so the Pipeline carries on with `NULL` too."),
+            where(i), call_name(e), call_name(e)))
+    }
+    if ("env_setup" %in% st$flags)
+      add(kind = "pipeline_setup", setup = "environment_setup", where = where(i),
+          suggest = NA,
+          message = sprintf(paste0(
+            "%s sets up the R library (`.libPaths()`, `renv`): that belongs in the ",
+            "project's `.Rprofile` (renv writes it there), not in a Pipeline. Drop it ",
+            "and list it under \"Lines left out\"; if `.Rprofile` doesn't do it, tell the user."),
+            where(i)))
+    for (d in unique(st$dev_paths))
+      add(kind = "pipeline_setup", setup = "dev_package", where = where(i), path = d,
+          suggest = sprintf("pkgload::load_all(\"%s\") before tar_option_set(imports = \"<package>\")", d),
+          message = sprintf(paste0(
+            "%s: `load_all(\"%s\")` loads a package under development. Put the same call at the ",
+            "top of the Pipeline script, add the package to `tar_option_set(packages =, imports =)`; ",
+            "`imports` makes targets track the package's functions, so editing one reruns the ",
+            "Targets that use it."), where(i), d))
+  }
+  libs <- unique(unlist(lapply(statements, function(x) x$st$libraries)))
+  for (pkg in libs[vapply(libs, is_local_package, TRUE)])
+    add(kind = "pipeline_setup", setup = "local_package", package = pkg, where = NA,
+        suggest = sprintf("tar_option_set(packages = c(..., \"%s\"), imports = \"%s\")", pkg, pkg),
+        message = sprintf(paste0(
+          "`%s` is installed from local source, not from a repository: probably an ",
+          "in-house package. Ask the user whether to add `imports = \"%s\"` to ",
+          "`tar_option_set()`, so editing its functions reruns the Targets that use them."),
+          pkg, pkg))
+  out
+}
+
 flow_scan <- function(project, scripts) {
   statements <- list(); script_info <- list()
   for (s in scripts) {
@@ -500,7 +700,8 @@ flow_scan <- function(project, scripts) {
       flow_walk(exprs[[i]], st)
       k <- refs[[i]][[1]]
       statements[[length(statements) + 1]] <- list(
-        script = s, where = origin_label(s, t, k), st = st,
+        script = s, where = origin_label(s, t, k), st = st, expr = exprs[[i]],
+        base = if (t$notebook) notebook_wd(project, s) else ".",
         code = paste(trimws(as.character(refs[[i]]))[1], collapse = ""))
     }
   }
@@ -593,7 +794,7 @@ flow_scan <- function(project, scripts) {
               else "nothing kept"))
       }
     }
-    if (length(st$applies)) {
+    if (length(st$applies) && !"source" %in% st$reads) {
       add(kind = "branch_candidate", where = statements[[i]]$where,
           via = st$applies[[1]], over = NA, collects = I(writes_of[[i]]),
           message = sprintf("`%s()` at %s applies a function to each element: a candidate for dynamic branching.",
@@ -604,17 +805,15 @@ flow_scan <- function(project, scripts) {
       by_reference = "changes a data.table by reference (`:=`, `set*()`): the function must `data.table::copy()` its input first, or it changes the upstream Target's value in memory",
       global_assign = "assigns with `<<-`: a Target can't change another Target; return the value instead",
       assign = "creates a variable with `assign()`: name it explicitly so it can become a Target",
-      options = "sets `options()`, which later code relies on: set it in the Pipeline script, before the Targets",
-      Sys.setenv = "sets an environment variable, which later code relies on: set it in the Pipeline script, before the Targets",
-      Sys.setlocale = "sets the locale for later code: set it in the Pipeline script, before the Targets",
       attach = "attaches data with `attach()`: pass the data as an argument instead",
-      set.seed = "sets the seed: targets gives each Target its own seed, so later random draws differ (compared by structure). If it sits right before one random Step, call it inside that Step's function to keep the exact value",
       carried_reduce = "folds with `Reduce()`/`accumulate()`: each step feeds the next, so keep it inside one Target")
     for (f in intersect(flags, names(msgs)))
       add(kind = if (f == "carried_reduce") "carried_loop" else "global_state",
           flag = f, where = statements[[i]]$where,
           message = paste0(statements[[i]]$where, ": ", msgs[[f]], "."))
   }
+
+  findings <- c(findings, setup_findings(project, statements))
 
   # 4. Names used before the statement that defines them.
   for (i in seq_len(n)) for (v in reads_of[[i]]) {
@@ -742,7 +941,7 @@ static_check <- function(wd, pipeline = "_targets.R") {
     out$validate <- tryCatch({ targets::tar_validate(script = pipeline); "ok" },
                              error = function(e) conditionMessage(e))
     out$manifest <- tryCatch(
-      as.data.frame(targets::tar_manifest(fields = c("name", "command"),
+      as.data.frame(targets::tar_manifest(fields = c("name", "command", "error"),
                                           script = pipeline)),
       error = function(e) conditionMessage(e)
     )
@@ -829,13 +1028,16 @@ static_ok <- function(s) {
     is.data.frame(s$manifest)
 }
 
+# Targets declared with error = "null" may fail: the Pipeline carries on
+# with NULL, as a script carries on past a try(). They're not a failure.
 build_pipeline <- function(wd, script = "_targets.R", store = "_targets",
-                           names = NULL) {
+                           names = NULL, tolerated = character()) {
   with_wd(wd, tryCatch({
     targets::tar_make(names = !!names, script = script, store = store,
                       reporter = "silent")
     errored <- targets::tar_meta(fields = error, store = store,
                                  complete_only = TRUE)
+    errored <- errored[!errored$name %in% tolerated, ]
     if (nrow(errored)) {
       paste0(errored$name, ": ", errored$error, collapse = "; ")
     } else NULL
@@ -852,7 +1054,13 @@ outdated_after_build <- function(wd, script, store) {
       m <- targets::tar_manifest(fields = c("name", "cue_mode"), script = script)
       m$name[m$cue_mode == "always"]
     }, error = function(e) character())
-    setdiff(out, always)
+    m_err <- tryCatch(targets::tar_manifest(fields = c("name", "error"), script = script),
+                      error = function(e) NULL)
+    null_err <- if (is.null(m_err)) character() else m_err$name[m_err$error == "null"]
+    errored <- tryCatch(targets::tar_meta(fields = error, store = store,
+                                          complete_only = TRUE)$name,
+                        error = function(e) character())
+    setdiff(out, c(always, intersect(null_err, errored)))
   }, error = function(e) character()))
 }
 
@@ -1034,7 +1242,18 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
 
   # 2. Build the Pipeline in its own copy.
   pipe_before <- file_hashes(pipe_dir)
-  err <- build_pipeline(pipe_dir, script = pipeline, store = store)
+  man <- result$static$manifest
+  tolerated <- if ("error" %in% names(man)) man$name[man$error %in% "null"] else character()
+  err <- build_pipeline(pipe_dir, script = pipeline, store = store,
+                        tolerated = tolerated)
+  if (length(tolerated)) {
+    meta <- with_wd(pipe_dir, tryCatch(targets::tar_meta(fields = error, store = store,
+                                                         complete_only = TRUE),
+                                       error = function(e) NULL))
+    if (!is.null(meta)) result$tolerated_errors <- lapply(
+      which(meta$name %in% tolerated), function(k)
+        list(target = meta$name[[k]], error = meta$error[[k]]))
+  }
   if (!is.null(err)) {
     result$status <- "error"
     result$errors <- list(paste("Pipeline failed:", err))
@@ -1073,7 +1292,9 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
     } else {
       value <- read_target(pipe_dir, name, store)
       expected <- script_objects[[step]]
-      if (!entry$stochastic && values_match(value, expected)) {
+      # An exact match counts even for a stochastic Target: the Conversion
+      # reproduced the script's random draws (set.seed() in the function).
+      if (values_match(value, expected)) {
         entry$result <- "match"
       } else {
         if (!entry$stochastic) {

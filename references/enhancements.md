@@ -14,9 +14,9 @@ Offer only the Enhancements whose condition holds, in this order:
 
 | Enhancement | Offer it when | How | House-style reference |
 |---|---|---|---|
-| Storage format | a Target holds a large R object, or a large data frame | `tar_qs()` (needs `qs2`), `tar_parquet()` (needs `arrow`), `tar_nanoparquet()` | `vendor/targets-r-skill/references/targets.md` |
+| Storage format | a Target holds a large R object, or a large data frame | `tar_qs()` (needs `qs2`), `tar_parquet()` (needs `arrow`), `tar_nanoparquet()`; when most Targets take the same format, set it once with `tar_option_set(format = "qs")` | `vendor/targets-r-skill/references/targets.md` |
 | Dynamic branching | a Step loops over groups, files or parameters (`for`, `lapply`, `purrr::map`, `split`) | `pattern = map(...)`, with an upstream Target holding the values to iterate over | `vendor/targets-r-skill/references/branching.md` |
-| Parallel workers | branching or independent Targets mean several can run at once | `tar_option_set(controller = crew::crew_controller_local(workers = n))` | `vendor/targets-r-skill/references/performance.md` |
+| Parallel workers | branching or independent Targets mean several can run at once | `tar_option_set(controller = crew::crew_controller_local(workers = n))`; any `options()`/`Sys.setenv()` line in the setup must also go into `tar_hook_before()`, because workers don't run it (`references/setup.md`) | `vendor/targets-r-skill/references/performance.md` |
 | Render the document | a Source Script is a `.qmd` or `.Rmd` the user renders | a new copy of the notebook reads results with `tar_read()`, rendered by `tar_quarto()` or `tar_render()` (see below) | `vendor/targets-r-skill/references/literate.md` |
 
 If an Enhancement needs a package that isn't installed, offer it only together with the instruction to install that package: the user installs it, never targetfy.

@@ -60,9 +60,9 @@ A `for` loop that only fills a collection at the loop variable's position (`fits
 | `by_reference` (`:=`, `set*()`) | start the function with `x <- data.table::copy(x)`: otherwise it changes the upstream Target's value in memory |
 | `global_assign` (`<<-`) | return the value from the function and make it a Target |
 | `assign` | name the variable explicitly, so it can become a Target |
-| `options`, `Sys.setenv`, `Sys.setlocale` | set it once in the Pipeline script, before `list(...)`, so every Target sees it |
 | `attach` | pass the data as an argument |
-| `set.seed` | targets gives each Target its own seed, so random Steps are compared by structure. If `set.seed()` comes right before the only random Step, call it at the top of that Step's function so the value matches exactly |
+
+Options, environment variables, seeds, memory and error handling are `pipeline_setup` findings: see `references/setup.md`.
 
 ## `defined_later`: used before it's defined
 

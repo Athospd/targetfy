@@ -26,9 +26,10 @@ coefs <- summary(model)$coefficients  # Step `model_summary`
 - Name each functions file after the Source Script its Steps come from: `<script name>_functions.R`. For example, the Steps of `simple_chain_of_operations.R` go in `R/simple_chain_of_operations_functions.R`. A Script Sequence gets one functions file per Source Script.
 - The Pipeline script (`_targets.R` or `targets_<name>.R`) holds only `library(targets)`, `library(tarchetypes)`, `tar_source("<functions folder>")`, `tar_option_set(packages = ...)` and short Target calls like `tar_target(name, fn(dep1, dep2))`. Always pass the folder to `tar_source()`, even when it's `R/`.
 - **Packages:** every package the scripts attach with `library()` or `require()` goes into `tar_option_set(packages = c(...))`. Calls like `pkg::fn()` stay as they are.
+- **The Pipeline script's setup** (functions defined in the scripts, sourced helpers, `options()`, `set.seed()`, `rm()`/`gc()`, `try()`, in-house packages): follow `references/setup.md`.
 - **Input files:** use `tar_file_read(name, "path", read = reader(!!.x))`, which creates `name_file` and `name`. For a set of files found with `list.files()`, use `tarchetypes::tar_files_input(name, list.files(...))`, which tracks each file.
 - **Output files:** use `tar_file(name, write_fn(value, "path"))`, where `write_fn` writes the file, creates its folder if needed, and returns the path.
-- **Sourced helpers:** a file that only defines functions is loaded where it is, with `tar_source(c("<functions folder>", "helpers.R"))`. A helper with top-level work (reading data, setting options) is converted like any Source Script.
+- **Sourced helpers:** a file that only defines functions is loaded where it is, with `tar_source(c("<functions folder>", "helpers.R"))`. A helper with top-level work (reading data, setting options) is converted like any Source Script. `read.json` says which is which (`sourced_file`, `sourced_folder`).
 - **Handoff Files** (`saveRDS()` in one script, `readRDS()` in a later one) become a direct dependency between Targets. Don't write the file.
 - **Notebooks** (`.qmd`, `.Rmd`, `.md`, `.ipynb`): convert their code as `read.R` extracts it, and rewrite paths relative to the project. See `references/notebooks.md`.
 - **Loops stay inside one function** during the Conversion, branchable or not. Branching is an Enhancement.
@@ -38,7 +39,8 @@ coefs <- summary(model)$coefficients  # Step `model_summary`
 
 These don't belong in a Pipeline. Drop each one and record it, with its file, line and reason, in the report:
 - `setwd()`, `rm(list = ls())`, `install.packages()`, `View()`, `readline()`, `browser()`;
-- bare console output: `print()`, `head()`, `str()`, `summary()` or a lone object name on its own line.
+- bare console output: `print()`, `head()`, `str()`, `summary()` or a lone object name on its own line;
+- `rm(x)` and `gc()` (replaced by `memory = "transient"`), `.libPaths()`, `renv::activate()`, and `knitr::opts_chunk$set()` in notebooks (see `references/setup.md`).
 
 If a dropped line computes something a later line uses, it's a Step and stays.
 

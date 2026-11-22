@@ -63,7 +63,8 @@ First run the flow scan. It runs none of the user's code:
 ```
 
 - For each notebook, `read.json` gives the path of its extracted code (`tangled`), with every chunk headed by the notebook line it starts at. It also lists the chunks skipped, the inline code and any warnings. Read that file in place of the notebook, then read `references/notebooks.md`.
-- `findings` lists what a naive one-variable-one-Target Conversion would get wrong: variables changed after another Step used them (`reassigned`, with `cycle: true` when one Target would depend on itself), files read and then overwritten (`in_place_file`), Handoff Files, loops that carry state, loops that could be branched, global side effects, and names used before they're defined. Read `references/flow.md` when there are any findings: it says how to handle each kind. Ask the user only about `in_place_file`.
+- `findings` lists what a naive one-variable-one-Target Conversion would get wrong: variables changed after another Step used them (`reassigned`, with `cycle: true` when one Target would depend on itself), files read and then overwritten (`in_place_file`), Handoff Files, loops that carry state, loops that could be branched, global side effects, and names used before they're defined. Read `references/flow.md` when there are any findings: it says how to handle each kind. Ask the user only about `in_place_file` and `local_package`.
+- `script_function`, `sourced_file`, `sourced_folder` and `pipeline_setup` findings say what goes in the Pipeline script's setup: `tar_source()`, `tar_option_set()` (`seed`, `memory`, `imports`) and the lines before `list()`. Follow `references/setup.md`.
 
 Read every Source Script in full, plus every file they `source()`. Then list:
 - the **Steps**;

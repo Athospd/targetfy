@@ -54,6 +54,30 @@ The example is `tests/fixtures/branching/`: a `for` loop fits one `lm()` per reg
 
 These lessons are in `references/enhancements.md`.
 
+## The Pipeline Setup: `tar_source()` and `tar_option_set()`
+
+Code that isn't a Step goes into the Pipeline Setup, the part of the Pipeline script above `list()`. The Flow Scan finds it, and `references/setup.md` holds the rules:
+
+| Script code | Pipeline Setup | How it was verified |
+|---|---|---|
+| `f <- function(...)` in a Source Script | copied verbatim into the functions file | fixture `setup` |
+| `source("helpers.R")` of a function-only file | `tar_source(c("R", "helpers.R"))`, loaded in place | fixture `setup` |
+| `source()` of a file that also does work | converted like a Source Script, never `tar_source()`d | scan test |
+| `lapply(list.files("utils", ...), source)` | `tar_source(c("R", "utils"))` | fixture `setup` |
+| `options()`, `Sys.setenv()`, `Sys.setlocale()` | the same line before `list()`; with workers, also `tar_hook_before()` | equivalent both ways; a Pipeline without it fails the check (`contrasts` changes the coefficients) |
+| top-level `set.seed(42)` | `tar_option_set(seed = 42)`, or `set.seed()` inside the function when it sits right before the only random Step | the in-function form matches exactly |
+| `rm(x)`, `gc()` | dropped, plus `memory = "transient", garbage_collection = TRUE` | fixture `setup` |
+| `try(x <- f())` | `error = "null"` on that Target | the check reports it under `tolerated_errors` |
+| `.libPaths()`, `renv::activate()` | dropped: it belongs in `.Rprofile` | scan test |
+| `pkgload::load_all("pkg")`, a locally installed package | `load_all()` at the top, `imports = "<package>"` | fixture `devpkg`; editing the package's function made the Target outdated |
+
+Check changes this needed:
+- **An exact match wins.** A Target with random calls whose value matches the script exactly is reported `match`, while still marked stochastic. It used to be compared by structure only.
+- **Tolerated errors.** Targets declared with `error = "null"` may fail without failing the build, and they're left out of `outdated_after_build`.
+- **The manifest** now includes each Target's `error` mode.
+
+Not verified: `tar_hook_before()` on real crew workers, since `crew` isn't installed on the test machine. The hook itself was tested on a sequential Pipeline.
+
 ## Still out of scope
 
 - A granularity setting for Targets.

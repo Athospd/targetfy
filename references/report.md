@@ -44,6 +44,10 @@ One row per `read.json` finding, and what the Pipeline does about it.
 | `data/sales.csv` read and overwritten | clean.R:1, clean.R:13 | writes `data/sales_targetfy.csv` instead (user's choice); `data/sales.csv` is no longer changed |
 | loop carries `x` between iterations | clean.R:9 | kept inside `newton_sqrt2()` |
 | loop over `files` has independent iterations | regional_trends.R:7 | one Target; offered as branching below |
+| `helpers.R` only defines functions | analysis.R:2 | loaded in place: `tar_source(c("R", "helpers.R"))` |
+| `options(contrasts = ...)` | analysis.R:4 | set in the Pipeline script, before `list()` |
+| `set.seed(42)` right before the only random Step | analysis.R:5 | moved into `make_data()`: exact match |
+| `try(extra <- read.csv("absent.csv"))` | analysis.R:22 | `extra` has `error = "null"`; it failed in the check, as in the script (tolerated) |
 
 ## Unresolved Objects
 | Name | Found in | Decision |

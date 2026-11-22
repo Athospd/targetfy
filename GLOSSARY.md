@@ -64,6 +64,10 @@ _Avoid_: stateful loop
 The reading of the Script Sequence's code, without running it, that `scripts/read.R` does before a Conversion: what each statement reads and writes, plus every Version, In-place File, Handoff File, Carried Loop and branching candidate.
 _Avoid_: lint, static analysis
 
+**Pipeline Setup**:
+The part of the Pipeline script above the list of Targets: `tar_source()`, `tar_option_set()` and lines that change the session (`options()`, `load_all()`). Script code that defines functions or changes the session goes there instead of becoming Targets.
+_Avoid_: header, preamble
+
 **Equivalence Check**:
 The verification that runs the Source Script and the Pipeline in a throwaway copy of the project and compares their results.
 _Avoid_: test, diff
