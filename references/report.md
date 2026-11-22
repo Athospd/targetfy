@@ -21,6 +21,9 @@ Only when the status isn't "equivalent" or "not equivalent". For example: `analy
 | sales_file | — | not compared | input file tracking |
 | model_fit | `fit` | unverified | after the failure point: this code never ran |
 
+## renv
+From `result.json`'s `renv`, only when the project has an `renv.lock`: the packages the Pipeline uses that the lockfile doesn't record (`missing`), or "all recorded". Say what to run: the renv Enhancement, then `renv::snapshot()` by the user.
+
 ## Display lines that failed
 From `result.json`'s `display_errors`: lines that only display something, which failed and were skipped. "None" when empty.
 | File:line | Code | Error |
@@ -35,6 +38,8 @@ From `result.json`'s `invalidation`: each input file was changed in a fresh copy
 | data/rates.csv | data file in the project | hidden dependency | fixed in run 2: now tracked by `rates` |
 | data/notes.txt | data file in the project | unused | nothing depends on it |
 | data/model.xlsx | read by the code | not tested | can't change this file safely |
+| https://example.org/rates.csv | web input (`web_inputs`) | not tested | a URL can't be changed; tracked with `format = "url"` |
+| data/shop.sqlite | data file in the project | pass | a SQLite database: the last row of each table was repeated |
 
 ## Files written by the scripts
 | File | Check | Notes |

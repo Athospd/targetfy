@@ -18,8 +18,28 @@ Offer only the Enhancements whose condition holds, in this order:
 | Branching | a `branch_candidate` finding: a Step loops over files, groups, parameters or repetitions | by its `style`: `dynamic` → `pattern = map(...)`; `static` → `tar_map()`; `groups` → `tar_group_by()`; `replicate` → `tar_rep()` (below) | `vendor/targets-r-skill/references/branching.md` |
 | Parallel workers | branching or independent Targets mean several can run at once | `tar_option_set(controller = crew::crew_controller_local(workers = n))`; any `options()`/`Sys.setenv()` line in the setup must also go into `tar_hook_before()`, because workers don't run it (`references/setup.md`) | `vendor/targets-r-skill/references/performance.md` |
 | Render the document | a Source Script is a `.qmd` or `.Rmd` the user renders | a new copy of the notebook reads results with `tar_read()`, rendered by `tar_quarto()` or `tar_render()` (see below) | `vendor/targets-r-skill/references/literate.md` |
+| Record packages in renv | `result.json` has `renv.missing`: the project has an `renv.lock` that doesn't record every package the Pipeline uses | `targets::tar_renv()` writes `_targets_packages.R` with a `library()` call per package, so renv finds them (see below) | |
+| Run on GitHub | the project is a git repository with a GitHub remote, and uses renv | `targets::tar_github_actions()` writes `.github/workflows/targets.yaml` (see below) | |
 
 If an Enhancement needs a package that isn't installed, offer it only together with the instruction to install that package: the user installs it, never targetfy.
+
+## Record packages in renv
+
+renv finds a project's packages by scanning its code for `library()` calls and `pkg::`. It doesn't see packages named as strings, as in `tar_option_set(packages = "dplyr")`, so `renv::snapshot()` can leave them out of `renv.lock`, and the Pipeline then fails on another machine.
+
+1. Run `Rscript -e 'targets::tar_renv(script = "<Pipeline script>", extras = character(0))'` from the project. By default `tar_renv()` also lists packages for targets' own tools (`visNetwork`, `shiny`, `crew`...); add them back only if the user wants those tools recorded. It writes `_targets_packages.R`, a new file. If that file already exists, ask before replacing it.
+2. Don't run `renv::snapshot()`: it changes `renv.lock`, the user's file. Tell the user to run it, and list `renv.missing`.
+3. Packages that aren't installed can't be recorded: name them for the user to install first (`renv::install()`).
+
+## Run on GitHub
+
+`targets::tar_github_actions()` writes `.github/workflows/targets.yaml`. On every push, GitHub restores the renv library, runs `tar_make()`, and keeps the store on a `targets-runs` branch, so later runs skip up-to-date Targets.
+
+- Offer it only with renv (the workflow restores packages from `renv.lock`), after the renv Enhancement if `renv.missing` isn't empty.
+- If `.github/workflows/targets.yaml` exists, don't offer it.
+- For a `targets_<name>.R` Pipeline, the workflow runs the project's default script: add `script` to its `tar_make()` call, or rely on the `_targets.yaml` project and set `TAR_PROJECT` in the workflow's `env:`.
+- Data files the Pipeline reads must be in the repository, and secrets (database passwords, API keys) go in the repository's GitHub secrets, never in the workflow file.
+- The check can't run GitHub: say the workflow is untested until the user pushes it, and tell them where to watch the run (the repository's Actions tab).
 
 ## Branching
 
@@ -30,6 +50,7 @@ Each `branch_candidate` finding has a `style` that picks the tool. Follow that r
 | `dynamic` | a loop or `lapply()` over files or a computed vector | `pattern = map(<values Target>)` | see below |
 | `static` | a loop over a short literal list: `for (deg in c(1, 2, 3))` | `fit_by_degree <- tar_map(values = list(deg = degrees), tar_target(fit, fit_poly(d, deg)))`, defined above `list()` | `tar_combine(fits, fit_by_degree, command = setNames(list(!!!.x), as.character(degrees)))`: the combined Targets are named `fit_1`, `fit_2`..., so restore the script's names |
 | `groups` | `lapply(split(d, d$g), f)`, `group_map()` | `tar_group_by(groups, d, g)` (needs `dplyr`), then `tar_target(x, f_one(groups), pattern = map(groups), iteration = "list")` | the per-group function returns `setNames(list(value), part$g[[1]])`; combine with `do.call(c, unname(x))`. Groups come out sorted, as `split()` sorts them |
+| `render_rep` | a loop rendering a document with `params` | `tar_render_rep()` / `tar_quarto_rep()`, done during the Conversion (`references/flow.md`, `render_call`) | the rendered files keep the script's names through the `output_file` column |
 | `replicate` | `replicate(100, mean(rnorm(20)))`, or a loop over `1:n` drawing random numbers | `tar_rep(sims_reps, mean(rnorm(20)), batches = 4, reps = 25)`: batches, not one branch per repetition | `tar_target(sims, unname(sims_reps))`: `tar_rep()` names every repetition. The values are random, so they're compared by structure |
 
 Prefer `static` only when the values are few, known in advance and worth reading in the graph (models, scenarios). For a list computed from data, use `dynamic`. For more than a few hundred iterations, batch them: `tar_rep()` for repetitions, or a `pattern = map()` over chunks of the input.

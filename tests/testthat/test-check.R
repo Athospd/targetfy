@@ -575,6 +575,10 @@ test_that("a statement that changes something is never skipped on error", {
   expect_false(check_env$is_display_only(quote(write.csv(d, "out.csv"))))
   expect_false(check_env$is_display_only(quote(library(dplyr))))
   expect_false(check_env$is_display_only(quote(tar_option_set(packages = "x"))))
+  # obj$method() can change obj (knitr options, R6 objects)
+  expect_false(check_env$is_display_only(quote(knitr::opts_chunk$set(echo = TRUE))))
+  expect_false(check_env$is_display_only(quote(model$fit(x))))
+  expect_true(check_env$is_display_only(quote(summary(model$fit))))
 })
 
 test_that("files that are already targets code are recognised", {
@@ -582,4 +586,100 @@ test_that("files that are already targets code are recognised", {
   roles <- vapply(finding(scan, "already_targets"), function(f) f$role, "")
   expect_equal(roles, c("report", "pipeline"))
   expect_equal(scan$scripts[["report.qmd"]]$targets_role, "report")
+})
+
+# --- v2.1 ---------------------------------------------------------------------
+
+test_that("a parameterized render loop suggests tar_render_rep(), and converts", {
+  scan <- check_env$flow_scan(file.path(fixtures, "render_rep", "project"), "analysis.R")
+  bc <- finding(scan, "branch_candidate")[[1]]
+  expect_equal(bc$style, "render_rep")
+  rc <- finding(scan, "render_call")[[1]]
+  expect_equal(rc$suggest, "tar_render_rep()")
+  expect_equal(as.character(unlist(rc$document)), "report.Rmd")
+  expect_true(rc$repeated)
+  res <- run_pipeline("render_rep", "analysis.R", "_targets.R")
+  expect_equal(res$status, "equivalent")
+  expect_setequal(vapply(res$files, function(f) f$file, ""),
+                  paste0("report_", c("north", "south", "east"), ".html"))
+})
+
+test_that("a single render suggests tar_render() and is never skipped as display", {
+  st <- check_env$new_flow()
+  check_env$flow_walk(quote(quarto::quarto_render("a.qmd")), st)
+  expect_true("quarto_render" %in% st$flags)
+  expect_false("param_render" %in% st$flags)
+  expect_false(check_env$is_display_only(quote(rmarkdown::render("a.Rmd"))))
+})
+
+test_that("a database read is flagged, and tar_change() tracks it", {
+  scan <- check_env$flow_scan(file.path(fixtures, "external", "project"), "orders.R")
+  ext <- Filter(function(f) identical(f$input, "external"), finding(scan, "hidden_input"))
+  expect_length(ext, 1)
+  expect_match(ext[[1]]$message, "tar_change")
+  res <- run_pipeline("external", "orders.R", "_targets.R")
+  expect_equal(res$status, "equivalent")
+  expect_equal(res$invalidation$inputs[[1]]$result, "pass")
+  res <- run_pipeline("external", "orders.R", "targets_untracked.R")
+  expect_equal(res$status, "not_equivalent")
+  expect_match(paste(unlist(res$errors), collapse = " "), "tar_change")
+})
+
+test_that("packages the Pipeline needs but renv.lock lacks are listed", {
+  r <- check_env$renv_status(file.path(fixtures, "external", "project"), "_targets.R")
+  expect_setequal(as.character(r$needed), c("targets", "tarchetypes", "DBI", "RSQLite"))
+  expect_equal(as.character(r$missing), "DBI")
+  expect_null(check_env$renv_status(file.path(fixtures, "render_rep", "project"), "_targets.R"))
+})
+
+test_that("a torch model needs tar_format(): plain RDS breaks once it's read back", {
+  skip_if_not(requireNamespace("torch", quietly = TRUE) && torch::torch_is_installed())
+  res <- run_pipeline("torch", "model.R", "_targets.R", invalidation = FALSE)
+  expect_equal(res$status, "equivalent")
+  res <- run_pipeline("torch", "model.R", "targets_rds.R", invalidation = FALSE)
+  expect_equal(res$status, "error")
+  expect_equal(res$failed_targets[[1]]$target, "pred")
+  expect_match(res$failed_targets[[1]]$error, "external pointer")
+})
+
+test_that("crew workers need options() in tar_hook_before()", {
+  skip_if_not(requireNamespace("crew", quietly = TRUE))
+  # targets < 1.9 reads a `worker` column crew 1.3 no longer reports.
+  skip_if(packageVersion("targets") < "1.9.0" && packageVersion("crew") >= "1.3.0",
+          "targets too old for this crew")
+  res <- run_pipeline("setup", "analysis.R", "targets_crew.R", invalidation = FALSE)
+  expect_equal(res$status, "equivalent")
+  res <- run_pipeline("setup", "analysis.R", "targets_crewnohook.R", invalidation = FALSE)
+  expect_equal(res$status, "not_equivalent")
+})
+
+test_that("a format = \"url\" Target is equivalent and listed as an untested web input", {
+  # skip_if_offline() also skips "on CRAN", which a local run counts as.
+  skip_if_not(curl::has_internet(), "offline")
+  res <- run_pipeline("url", "cars.R", "_targets.R")
+  expect_equal(res$status, "equivalent")
+  expect_length(res$outdated_after_build, 0)
+  expect_match(as.character(unlist(res$invalidation$web_inputs)), "^https://")
+})
+
+test_that("tar_quarto_rep() matches a quarto_render() loop; support files aren't results", {
+  skip_if_not_installed("quarto")
+  skip_if(is.null(quarto::quarto_path()), "Quarto not on the PATH")
+  scan <- check_env$flow_scan(file.path(fixtures, "render_rep", "project"), "analysis_quarto.R")
+  expect_equal(finding(scan, "render_call")[[1]]$suggest, "tar_quarto_rep()")
+  res <- run_pipeline("render_rep", "analysis_quarto.R", "targets_quarto.R")
+  expect_equal(res$status, "equivalent")
+  expect_setequal(vapply(res$files, function(f) f$file, ""),
+                  paste0("qreport_", c("north", "south", "east"), ".html"))
+  expect_gt(res$render_support_files, 0)
+})
+
+test_that("a keras model needs tar_format(): plain RDS breaks once it's read back", {
+  skip_if_not_installed("keras3")
+  skip_if_not(reticulate::virtualenv_exists("r-keras"), "no r-keras Python environment")
+  res <- run_pipeline("keras", "model.R", "_targets.R", invalidation = FALSE)
+  expect_equal(res$status, "equivalent")
+  res <- run_pipeline("keras", "model.R", "targets_rds.R", invalidation = FALSE)
+  expect_equal(res$status, "error")
+  expect_equal(res$failed_targets[[1]]$target, "pred")
 })

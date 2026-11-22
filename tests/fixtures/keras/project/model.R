@@ -1,0 +1,7 @@
+library(keras3)
+pts <- read.csv("data/points.csv")
+set_random_seed(1)
+net <- keras_model_sequential(input_shape = 1) |> layer_dense(units = 1)
+net |> compile(optimizer = optimizer_sgd(learning_rate = 0.01), loss = "mse")
+net |> fit(as.matrix(pts["x"]), as.matrix(pts["y"]), epochs = 50, verbose = 0)
+pred <- as.numeric(predict(net, as.matrix(pts["x"]), verbose = 0))

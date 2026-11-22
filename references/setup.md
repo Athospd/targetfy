@@ -58,7 +58,7 @@ targets stores each Target with `saveRDS()` by default. Some objects only point 
 | Finding | What to do |
 |---|---|
 | `torch` (`torch`, `luz`) | give each Target holding a model or tensor the format below |
-| `keras` (`keras`, `keras3`, `tensorflow`) | the same pattern, with `keras3::save_model(object, path)` / `keras3::load_model(path)`; the path needs a `.keras` extension, so write to `paste0(path, ".keras")` and rename |
+| `keras` (`keras`, `keras3`, `tensorflow`) | the `keras_format` below |
 | `h2o` | save the model with `h2o.saveModel()` inside the function, and return the path from a `format = "file"` Target |
 | `xgboost` | RDS works, but may not load in another xgboost version: mention it, and offer a `tar_format()` using `xgb.save.raw()` / `xgb.load.raw()` |
 | `rJava` | keep the Java objects inside one function; return plain R values |
@@ -87,4 +87,22 @@ torch_format <- tar_format(
 tar_target(net, train_net(data), format = torch_format)
 ```
 
-Define `torch_format` in the Pipeline script, above `list()`. The Invalidation Check can't change a URL, so the report lists web inputs as untested.
+keras3 only saves to a path ending in `.keras`, and the store's paths have no extension, so `keras_format` goes through a temporary file:
+
+```r
+keras_format <- tar_format(
+  read = function(path) {
+    tmp <- paste0(tempfile(), ".keras")
+    file.copy(path, tmp)
+    keras3::load_model(tmp)
+  },
+  write = function(object, path) {
+    tmp <- paste0(tempfile(), ".keras")
+    keras3::save_model(object, tmp)
+    file.rename(tmp, path)
+  }
+)
+tar_target(net, train_net(pts), format = keras_format)
+```
+
+Define `torch_format` or `keras_format` in the Pipeline script, above `list()`. Without it, the Pipeline can still pass while the model stays in memory, then fail ("external pointer is not valid" for torch, "object is from previous session and is now invalid" for keras) as soon as a Target reads the model back from the store: on the next run, or with `memory = "transient"`. The Invalidation Check can't change a URL: it lists web inputs under `invalidation.web_inputs`, and the report says they're untested. A `format = "url"` Target is up to date right after the build as long as the server's ETag or modification time is unchanged.

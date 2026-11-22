@@ -310,11 +310,16 @@ APPLY_FUNS <- c("lapply", "sapply", "vapply", "Map", "mapply", "map",
   "mclapply", "group_map", "by", "tapply")
 CARRY_FUNS <- c("Reduce", "accumulate", "reduce")
 SETUP_FIELDS <- c("sourced", "list_dirs", "libraries", "global_code", "dev_paths",
-                  "dynamic_reads", "session_reads", "urls")
+                  "dynamic_reads", "session_reads", "urls", "rendered", "external_reads")
 # Reads of session state targets can't see: a Target using them doesn't
 # rerun when they change.
 SESSION_READS <- c("Sys.getenv", "Sys.Date", "Sys.time", "date", "getOption",
                    "Sys.info", "Sys.timezone", "nsl", "file.mtime", "file.info")
+# Reads from systems outside the project (databases, web APIs): targets
+# can't see their data change.
+EXTERNAL_READS <- c("dbGetQuery", "dbReadTable", "dbSendQuery", "dbFetch",
+                    "sqlQuery", "sqlFetch", "bq_table_download", "bq_project_query",
+                    "req_perform", "GET", "POST", "s3read_using", "get_object")
 APPEND_FUNS <- c("c", "rbind", "cbind", "append", "bind_rows", "bind_cols",
                  "list", "rbindlist")
 
@@ -366,7 +371,7 @@ new_flow <- function() {
   st$libraries <- character(); st$global_code <- character()
   st$seed <- NULL; st$dev_paths <- character()
   st$dynamic_reads <- character(); st$session_reads <- character()
-  st$urls <- character(); st$apply_over <- list()
+  st$urls <- character(); st$apply_over <- list(); st$rendered <- character(); st$external_reads <- character()
   st
 }
 
@@ -507,7 +512,18 @@ flow_walk <- function(e, st) {
     if (length(args) && !identical(args[[1]], quote(expr = )))
       st$apply_over[[length(st$apply_over) + 1]] <- args[[1]]
   }
+  if (fname %in% EXTERNAL_READS)
+    st$external_reads <- c(st$external_reads, paste(deparse(e), collapse = " "))
   if (fname %in% c("replicate", "rerun")) st$flags <- c(st$flags, "replicate")
+  # rmarkdown::render() / quarto::quarto_render(): a document built by the
+  # script; with params, once per parameter set.
+  if (fname %in% c("render", "quarto_render", "render_site")) {
+    st$flags <- c(st$flags, if (fname == "quarto_render") "quarto_render" else "rmd_render")
+    if (any(c("params", "execute_params") %in% names(args)))
+      st$flags <- c(st$flags, "param_render")
+    doc <- if (length(args)) literal_path(args[[1]]) else NULL
+    if (!is.null(doc)) st$rendered <- c(st$rendered, doc)
+  }
   if (fname %in% c("split", "group_split")) st$flags <- c(st$flags, "split")
   if (fname %in% c("group_map", "group_modify", "group_walk", "do"))
     st$flags <- c(st$flags, "group_apply")
@@ -728,6 +744,17 @@ setup_findings <- function(project, statements) {
             "Check can't change it. Track it with `tar_target(<name>_url, \"%s\", format = \"url\")` ",
             "and read from that Target, or download it with `tarchetypes::tar_download()`, ",
             "which tracks the URL and the downloaded file."), where(i), u, u))
+    for (code in unique(st$external_reads))
+      add(kind = "hidden_input", input = "external", where = where(i), code = code,
+          suggest = I(c("tar_change", "tar_age")),
+          message = sprintf(paste0(
+            "%s: `%s` reads from a database or web service. targets can't see that data ",
+            "change, so the Target reading it would never rerun. Pick one: ",
+            "`tarchetypes::tar_change(<name>, <read>, change = <cheap check>)` reruns when a ",
+            "cheap check changes (a row count, `max(updated_at)`, a version or ETag); ",
+            "`tarchetypes::tar_age(<name>, <read>, age = as.difftime(1, units = \"days\"))` ",
+            "reruns once the result is older than that. Ask the user which fits."),
+            where(i), substr(code, 1, 80)))
     if ("connection" %in% st$flags)
       add(kind = "unsaveable_object", object = "connection", where = where(i),
           message = sprintf(paste0(
@@ -781,6 +808,7 @@ setup_findings <- function(project, statements) {
 # static: a short literal list of values, each worth a readable name;
 # dynamic: anything else.
 branch_style <- function(over, reads, flags) {
+  if ("param_render" %in% flags) return("render_rep")
   if (!is.null(over) && is_count_seq(over) && any(reads %in% RANDOM_FUNS)) return("replicate")
   if (any(c("split", "group_apply") %in% flags)) return("groups")
   if (!is.null(over) && is_short_literal(over)) return("static")
@@ -804,6 +832,7 @@ BRANCH_ADVICE <- c(
   dynamic = "A candidate for dynamic branching: `pattern = map(...)`.",
   static = "Its values are a short literal list: a candidate for static branching with `tarchetypes::tar_map()`, which gives each value a readable Target name.",
   replicate = "It repeats random draws: a candidate for `tarchetypes::tar_rep()` (batches of repetitions, each with its own seed), rather than one branch per repetition.",
+  render_rep = "It renders a document once per parameter set: a candidate for `tarchetypes::tar_render_rep()` (R Markdown) or `tarchetypes::tar_quarto_rep()` (Quarto), with the parameters as a data frame, one row per document.",
   groups = "It works group by group: a candidate for `tarchetypes::tar_group_by()` plus `pattern = map(<groups>)`.")
 
 flow_scan <- function(project, scripts) {
@@ -941,6 +970,21 @@ flow_scan <- function(project, scripts) {
           collects = I(writes_of[[i]]), style = style,
           message = paste(sprintf("`%s()` at %s applies a function to each element.",
                                   via, statements[[i]]$where), BRANCH_ADVICE[[style]]))
+    }
+    if (any(c("rmd_render", "quarto_render") %in% st$flags)) {
+      quarto <- "quarto_render" %in% st$flags
+      rep_ <- "param_render" %in% st$flags &&
+        (length(st$loops) || length(st$applies))
+      tool <- paste0(if (quarto) "tar_quarto" else "tar_render", if (rep_) "_rep" else "", "()")
+      add(kind = "render_call", where = statements[[i]]$where,
+          document = I(unique(st$rendered)), engine = if (quarto) "quarto" else "rmarkdown",
+          repeated = rep_, suggest = tool,
+          message = sprintf(paste0(
+            "%s renders %s. In the Pipeline, make the document a Target with `tarchetypes::%s`%s: ",
+            "targets then tracks the document's source and reruns it when it, or a Target it reads, changes."),
+            statements[[i]]$where,
+            if (length(st$rendered)) paste0("`", unique(st$rendered), "`", collapse = ", ") else "a document",
+            tool, if (rep_) ", one row of `params` per document" else ""))
     }
     flags <- unique(st$flags)
     msgs <- c(
@@ -1087,7 +1131,7 @@ SIDE_EFFECT_FUNS <- c("library", "require", "requireNamespace", "source",
   "data", "load", "attach", "png", "pdf", "jpeg", "svg", "tiff", "bmp",
   "ggsave", "saveRDS", "save", "if", "for", "while", "repeat",
   "{", "(", "assert_that", "validate", "tar_option_set", "tar_source",
-  "tar_config_set", "Sys.setlocale")
+  "tar_config_set", "Sys.setlocale", "render", "quarto_render", "render_site")
 
 # A top-level statement that only displays something: a lone name, a
 # table, a plot, a printed summary. It changes nothing later code sees.
@@ -1095,6 +1139,9 @@ is_display_only <- function(e) {
   if (is.symbol(e)) return(TRUE)
   if (!is.call(e)) return(FALSE)
   if (call_name(e) %in% SIDE_EFFECT_FUNS) return(FALSE)
+  # obj$method(): the method can change obj (knitr::opts_chunk$set(), R6).
+  if (is.call(e[[1]]) && (identical(e[[1]][[1]], quote(`$`)) ||
+                          identical(e[[1]][[1]], quote(`@`)))) return(FALSE)
   st <- new_flow()
   flow_walk(e, st)
   !length(stats::na.omit(st$writes)) && !length(st$files_written) &&
@@ -1398,7 +1445,7 @@ structure_match <- function(a, b) identical(structure_of(a), structure_of(b))
 # what it thinks is outdated. A Step whose value changes while its Target
 # stays up to date is a hidden dependency: the Pipeline would go stale.
 
-PERTURB_EXT <- c("csv", "tsv", "txt", "dat", "rds")
+PERTURB_EXT <- c("csv", "tsv", "txt", "dat", "rds", "sqlite", "sqlite3", "db")
 NOT_INPUT <- c("^R/", "^R_targets/", "^renv/", "^\\.", "(^|/)DESCRIPTION$",
                "(^|/)NAMESPACE$", "\\.Rproj$", "^targetfy-")
 
@@ -1412,6 +1459,24 @@ perturb_file <- function(path) {
     if (length(nz) < (if (ext %in% c("csv", "tsv")) 2 else 1)) return(FALSE)
     writeLines(c(l[seq_len(max(nz))], l[[max(nz)]]), path)
     return(TRUE)
+  }
+  if (ext %in% c("sqlite", "sqlite3", "db")) {
+    # A SQLite database: repeat the last row of every table.
+    if (!requireNamespace("DBI", quietly = TRUE) ||
+        !requireNamespace("RSQLite", quietly = TRUE)) return(FALSE)
+    con <- tryCatch(DBI::dbConnect(RSQLite::SQLite(), path), error = function(e) NULL)
+    if (is.null(con)) return(FALSE)
+    on.exit(DBI::dbDisconnect(con))
+    changed <- FALSE
+    for (tb in DBI::dbListTables(con)) {
+      q <- DBI::dbQuoteIdentifier(con, tb)
+      n <- DBI::dbGetQuery(con, paste("SELECT COUNT(*) AS n FROM", q))$n
+      if (!n) next
+      DBI::dbExecute(con, paste("INSERT INTO", q, "SELECT * FROM", q,
+                                "WHERE rowid = (SELECT MAX(rowid) FROM", q, ")"))
+      changed <- TRUE
+    }
+    return(changed)
   }
   if (ext == "rds") {
     x <- tryCatch(readRDS(path), error = function(e) NULL)
@@ -1439,10 +1504,11 @@ tracked_files <- function(wd, store) {
 # and code, aren't inputs.
 invalidation_inputs <- function(project, scripts, files, script_written,
                                 tracked, max_inputs) {
-  scanned <- tryCatch({
-    sc <- flow_scan(project, scripts)
-    unique(unlist(lapply(sc$statements, function(s) unlist(s$files_read))))
-  }, error = function(e) character())
+  sc <- tryCatch(flow_scan(project, scripts), error = function(e) NULL)
+  scanned <- unique(unlist(lapply(sc$statements, function(s) unlist(s$files_read))))
+  if (is.null(scanned)) scanned <- character()
+  web <- unique(unlist(lapply(sc$findings, function(f)
+    if (identical(f$kind, "hidden_input") && identical(f$input, "url")) f$url)))
   is_data <- function(f) tolower(tools::file_ext(f)) %in% PERTURB_EXT &&
     !any(vapply(NOT_INPUT, grepl, TRUE, x = f))
   rest <- files[vapply(files, is_data, TRUE) & !files %in% script_written]
@@ -1450,6 +1516,7 @@ invalidation_inputs <- function(project, scripts, files, script_written,
   cand <- cand[!cand %in% script_written | cand %in% scanned]
   list(test = utils::head(cand, max_inputs),
        skipped = utils::tail(cand, max(0, length(cand) - max_inputs)),
+       web = if (is.null(web)) character() else web,
        origin = stats::setNames(ifelse(cand %in% scanned, "read by the code",
                                 ifelse(cand %in% tracked, "tracked by the Pipeline",
                                        "data file in the project")), cand))
@@ -1529,12 +1596,56 @@ invalidation_check <- function(project, scripts, files, root, pipe_dir,
     unlink(c(sdir, pdir), recursive = TRUE)
   }
   list(inputs = out, not_tested = I(inputs$skipped),
+       web_inputs = I(inputs$web),
        max_inputs = max_inputs)
 }
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+# Packages the Pipeline needs that the project's renv.lock doesn't record.
+# renv finds packages from library() calls and pkg::, but not from strings
+# such as tar_option_set(packages = "dplyr"): tar_renv() writes those as
+# library() calls in _targets_packages.R, so renv::snapshot() records them.
+pipeline_packages <- function(project, pipeline) {
+  files <- c(file.path(project, pipeline),
+             list.files(file.path(project, c("R", "R_targets")), "\\.[Rr]$", full.names = TRUE))
+  pk <- c("targets", "tarchetypes")
+  for (f in files[file.exists(files)]) {
+    ex <- tryCatch(parse(f, keep.source = FALSE), error = function(e) NULL)
+    if (is.null(ex)) next
+    walk <- function(e) {
+      if (is.call(e)) {
+        f0 <- e[[1]]
+        if (is.call(f0) && (identical(f0[[1]], quote(`::`)) || identical(f0[[1]], quote(`:::`))))
+          pk <<- c(pk, as.character(f0[[2]]))
+        nm <- call_name(e)
+        if (nm %in% c("library", "require", "requireNamespace") && length(e) > 1)
+          pk <<- c(pk, as.character(e[[2]]))
+        if (nm == "tar_option_set" && !is.null(e$packages))
+          pk <<- c(pk, unlist(tryCatch(eval(e$packages, baseenv()), error = function(err) NULL)))
+        if (nm %in% c("tar_target", "tar_target_raw") && !is.null(e$packages))
+          pk <<- c(pk, unlist(tryCatch(eval(e$packages, baseenv()), error = function(err) NULL)))
+        for (a in as.list(e)[-1]) if (!missing(a)) walk(a)
+      }
+    }
+    for (e in ex) walk(e)
+  }
+  base <- rownames(utils::installed.packages(priority = "base"))
+  setdiff(unique(pk[nzchar(pk)]), base)
+}
+
+renv_status <- function(project, pipeline) {
+  lock <- file.path(project, "renv.lock")
+  if (!file.exists(lock)) return(NULL)
+  recorded <- tryCatch(names(jsonlite::read_json(lock)$Packages), error = function(e) NULL)
+  if (is.null(recorded)) return(list(lockfile = "renv.lock", readable = FALSE))
+  needed <- pipeline_packages(project, pipeline)
+  list(lockfile = "renv.lock", readable = TRUE, needed = I(needed),
+       missing = I(setdiff(needed, recorded)),
+       packages_file = file.exists(file.path(project, "_targets_packages.R")))
+}
 
 targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
                            max_copy_mb = 1024, allow_large = FALSE,
@@ -1544,6 +1655,7 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
   project <- normalizePath(project, winslash = "/", mustWork = TRUE)
   result <- list(mode = mode, pipeline = pipeline, store = store, status = NULL, static = NULL, targets = list(),
                  files = list(), errors = list())
+  result$renv <- tryCatch(renv_status(project, pipeline), error = function(e) NULL)
   missing_scripts <- scripts[!file.exists(file.path(project, scripts))]
   if (length(missing_scripts)) {
     result$status <- "error"
@@ -1640,7 +1752,18 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
   }
   if (!is.null(err)) {
     result$status <- "error"
-    result$errors <- list(paste("Pipeline failed:", err))
+    # Name the Targets that errored, with their own messages: tar_make()'s
+    # error is only generic debugging advice.
+    meta <- with_wd(pipe_dir, tryCatch(targets::tar_meta(fields = error, store = store,
+                                                         complete_only = TRUE),
+                                       error = function(e) NULL))
+    failed <- if (is.null(meta)) integer() else which(!meta$name %in% tolerated)
+    result$failed_targets <- lapply(failed, function(k)
+      list(target = meta$name[[k]], error = meta$error[[k]]))
+    result$errors <- if (length(failed))
+      as.list(sprintf("Pipeline failed: Target `%s` errored: %s",
+                      meta$name[failed], meta$error[failed]))
+    else list(paste("Pipeline failed:", err))
     return(result)
   }
   pipe_hashes <- file_hashes(pipe_dir)
@@ -1706,7 +1829,17 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
   # another path (`redirected_files`): compare the script's file there.
   handoff <- as.character(unlist(map$handoff_files))
   redirected <- map$redirected_files %||% list()
-  for (f in script_written) {
+  # Support files a rendered document puts in <document>_files/ (Quarto's
+  # and knitr's CSS, JavaScript, figures): named after the document, so the
+  # Pipeline's document copy writes them elsewhere. They aren't results.
+  is_render_support <- function(f) {
+    m <- regmatches(f, regexec("^(.*)_files/", f))[[1]]
+    length(m) == 2 && any(file.exists(file.path(project,
+      paste0(m[[2]], c(".qmd", ".Rmd", ".rmd", ".md", ".ipynb")))))
+  }
+  support <- Filter(is_render_support, script_written)
+  if (length(support)) result$render_support_files <- length(support)
+  for (f in setdiff(script_written, support)) {
     entry <- list(file = f)
     ext <- tolower(tools::file_ext(f))
     pf <- f
@@ -1758,10 +1891,15 @@ targetfy_check <- function(project, scripts, map = list(), mode = "equivalence",
       wrong <- Filter(function(r) r$result == "mismatch_after_change", inp$targets %||% list())
       if (length(hidden)) result$errors <- c(result$errors, list(sprintf(paste(
         "Hidden dependency: changing %s changes %s in the scripts, but the Pipeline",
-        "still thinks %s up to date. Track the file (tar_file_read(), or tar_target(...,",
-        "format = \"file\") passed to the function that reads it)."),
+        "still thinks %s up to date. %s"),
         inp$file, paste0("`", vapply(hidden, function(r) r$step, ""), "`", collapse = ", "),
-        if (length(hidden) > 1) "they are" else "it is")))
+        if (length(hidden) > 1) "they are" else "it is",
+        if (tolower(tools::file_ext(inp$file)) %in% c("sqlite", "sqlite3", "db"))
+          paste("It's a database: read it with `tarchetypes::tar_change()` and a cheap",
+                "check (a row count, `max(updated_at)`), or `tar_age()`; for a local",
+                "database file, a `format = \"file\"` Target passed to the reader also works.")
+        else paste("Track the file (tar_file_read(), or tar_target(...,",
+                   "format = \"file\") passed to the function that reads it)."))))
       if (length(wrong)) result$errors <- c(result$errors, list(sprintf(
         "After changing %s, %s reran but no longer match the scripts.", inp$file,
         paste0("`", vapply(wrong, function(r) r$target, ""), "`", collapse = ", "))))

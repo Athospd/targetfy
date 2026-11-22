@@ -53,6 +53,21 @@ This is a Handoff File, within one script or across scripts. Convert it to a dir
 
 A `for` loop that only fills a collection at the loop variable's position (`fits[[region]] <- ...`), or appends to it, or an `lapply()`/`map()` call. Convert it as one Target first, with the loop inside the function. It's then a candidate for the dynamic-branching Enhancement (`references/enhancements.md`). Don't branch during the Conversion.
 
+## `render_call`: the script renders a document
+
+`rmarkdown::render()` or `quarto::quarto_render()` in a Source Script builds a document. Convert it during the Conversion, not as an Enhancement, with the tool in the finding's `suggest`:
+
+| The script | The Pipeline |
+|---|---|
+| one `render("report.Rmd")` | `tar_render(report, "report_targets.Rmd")` |
+| one `quarto_render("report.qmd")` | `tar_quarto(report, "report_targets.qmd")` |
+| a loop or `lapply()` rendering with `params` (`repeated: true`) | `tar_render_rep(report, "report_targets.Rmd", params = params_by_region(sales))`, or `tar_quarto_rep(..., execute_params = ...)`. `params_by_region()` returns a data frame with one row per document: one column per parameter, plus `output_file` with the script's output names |
+
+- Never edit the user's document. Write a copy, `<document>_targets.Rmd` (or `.qmd`), in which each file the document reads (`read.csv("data/sales.csv")`) becomes the matching Target (`targets::tar_read(sales)`). For a Pipeline other than `_targets.R`, pass its store: `targets::tar_read(sales, store = "_targets_<name>")`, or the document reads (or fails on) the default `_targets/`. `tar_render()` only tracks Targets the document reads with `tar_read()`/`tar_load()`: a file read inside the document is a hidden dependency.
+- `tar_render_rep(report, ...)` creates a Target named `report_params` (`tar_quarto_rep()` does the same): never give a function or another Target that name.
+- The params data frame is computed in a Target, so it can depend on the data: when a new region appears, a new report is rendered.
+- Rendered files (`.html`, `.pdf`, `.docx`) are compared by existence only, since they embed dates and random ids. A document's `<document>_files/` folder (Quarto's and knitr's CSS, JavaScript and figures) isn't compared at all, since the copy writes it under its own name: `result.json` counts it as `render_support_files`.
+
 ## `global_state`: changes outside the variables
 
 | Flag | What to do |
@@ -68,6 +83,11 @@ Options, environment variables, seeds, memory and error handling are `pipeline_s
 
 - `dynamic_path`: a reader whose path is computed (`read.csv(rates_file)`). Work out which file it is and track it with `tar_file_read()`. The Invalidation Check tests every data file in the project anyway, so a miss shows up as a hidden dependency.
 - `url`: a reader or `download.file()` given a web address. Track it with `format = "url"` or `tar_download()` (`references/setup.md`). The Invalidation Check can't test it.
+- `external`: a database query or web API call (`dbGetQuery()`, `dbReadTable()`, `req_perform()`, `GET()`, `bq_table_download()`). targets can't see that data change. Ask the user which fits, and read it with:
+  - `tarchetypes::tar_change(orders, read_orders(db), change = orders_version(db))`, where `orders_version()` is a cheap query that changes when the data does (a row count plus a sum, `max(updated_at)`, a table version). The read reruns only when it changes, checked on every run.
+  - `tarchetypes::tar_age(orders, read_orders(db), age = as.difftime(1, units = "days"))`, when no cheap check exists: the read reruns once the stored result is older than that.
+  - The connection itself is never a Target (`unsaveable_object`): open and close it inside each function.
+  - The Invalidation Check changes local SQLite files (`.sqlite`, `.sqlite3`, `.db`) by repeating the last row of each table, so `tar_change()` on a local database is tested. A database server can't be changed: list it as untested.
 - `session`: `Sys.getenv()`, `Sys.Date()`, `Sys.time()`, `getOption()`, `file.mtime()`, `file.info()`. targets doesn't track these values. Make each its own Target and pass it to the Steps that use it. If it should be read on every run (today's date, an environment variable), give that Target `cue = tar_cue("always")`. Then only its dependents rerun, and only when the value changes.
 
 ## `unsaveable_object`: values that can't be Targets as they are

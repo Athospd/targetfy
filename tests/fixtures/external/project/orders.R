@@ -1,0 +1,5 @@
+library(DBI)
+con <- dbConnect(RSQLite::SQLite(), "data/shop.sqlite")
+orders <- dbGetQuery(con, "SELECT * FROM orders")
+dbDisconnect(con)
+by_region <- aggregate(amount ~ region, data = orders, FUN = sum)

@@ -1,0 +1,12 @@
+---
+title: "Sales report"
+params:
+  region: north
+---
+
+```{r}
+sales <- read.csv("data/sales.csv")
+mine <- sales[sales$region == params$region, ]
+```
+
+Total for `r params$region`: `r sum(mine$amount)`.

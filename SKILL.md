@@ -112,9 +112,10 @@ Read `result.json` and act on its `status`:
   - A non-empty `outdated_after_build` means the Pipeline is out of date right after being built: it changes its own inputs, usually by overwriting a file it reads.
   - A "Hidden dependency" error comes from the Invalidation Check (`invalidation.inputs`): changing that file changes those Steps in the scripts, but the Pipeline doesn't rerun their Targets. A function reads the file itself. Track it with `tar_file_read()`, or with a `format = "file"` Target passed to that function. `mismatch_after_change` means the Targets reran but no longer match the scripts.
 - Inputs the Invalidation Check couldn't change (`not_tested`: `.xlsx`, binary files, nested `.rds`) or didn't reach (`invalidation.not_tested`, past `--max-inputs`) stay unverified for tracking. Say so in the report.
+- `renv` appears when the project has an `renv.lock`. `renv.missing` lists the packages the Pipeline uses that the lockfile doesn't record: report them, and offer the renv Enhancement in step 6.
 - `display_errors` lists display-only lines (a bare name, a table, a plot, a leftover console call) that failed while the scripts ran. The check skipped them, because they change nothing the later code sees. Report each one: rendering the notebook would stop at that line.
 - **`not_checked`**: a package the code needs isn't installed (`missing_packages`), so the Static Check couldn't run. This is not a fault in the Conversion: don't change the Generated Files for it. Name the packages for the user and go to step 5.
-- **`error`**: the Pipeline failed to build, or a Source Script wasn't found. Treat a build failure like `not_equivalent`.
+- **`error`**: the Pipeline failed to build, or a Source Script wasn't found. Treat a build failure like `not_equivalent`: `failed_targets` names each Target that errored, with its message.
 - **`needs_confirmation`**: tell the user the copy size. Re-run with `--allow-large` or `--mode static`, as they choose.
 
 ## 5. Report

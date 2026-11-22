@@ -1,0 +1,8 @@
+{
+  "R": {"Version": "4.4.1", "Repositories": [{"Name": "CRAN", "URL": "https://cloud.r-project.org"}]},
+  "Packages": {
+    "targets": {"Package": "targets", "Version": "1.8.0", "Source": "Repository", "Repository": "CRAN"},
+    "tarchetypes": {"Package": "tarchetypes", "Version": "0.10.0", "Source": "Repository", "Repository": "CRAN"},
+    "RSQLite": {"Package": "RSQLite", "Version": "2.3.7", "Source": "Repository", "Repository": "CRAN"}
+  }
+}

@@ -1,0 +1,12 @@
+---
+title: "Sales report"
+params:
+  region: north
+---
+
+```{r}
+sales <- targets::tar_read(sales)
+mine <- sales[sales$region == params$region, ]
+```
+
+Total for `r params$region`: `r sum(mine$amount)`.
